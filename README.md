@@ -62,9 +62,14 @@ python scripts/train.py --model [MODEL_TYPE] [OPTIONS]
 | `--dropout_rate` | Dropout的丢弃率 | 0.25 |
 | `--epochs` | 训练轮数 | 6 |
 | `--batch_size` | 批量大小 | 128 |
+| `--validation_split` | 验证集比例，设为0则不使用验证集 | 0.1 |
+| `--patience` | 早停耐心值，连续多少个epoch验证性能未提升则停止训练 | 5 |
 | `--optimizer` | 优化器类型 (`adam`, `sgd`, `rmsprop`, `adamw`) | adam |
 | `--lr` | 学习率 | 0.001 |
 | `--weight_decay` | 权重衰减系数（L2正则化） | 0 |
+| `--lr_scheduler` | 是否使用学习率调度器(ReduceLROnPlateau) | True |
+| `--lr_patience` | 学习率调度器的耐心值，多少个epoch验证损失未改善则降低学习率 | 2 |
+| `--lr_factor` | 学习率调度器的降低因子 | 0.1 |
 | `--model_name` | 保存模型的自定义名称 | 模型类型名 |
 | `--exp_tag` | 实验标签，会添加到保存文件名中 | 空 |
 | `--output_dir` | 输出目录 | results |

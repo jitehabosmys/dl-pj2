@@ -10,25 +10,23 @@ import random
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.loaders import get_cifar_loader
-from models.cifar_net import BasicCNN, CNNWithBatchNorm, CNNWithDropout, ResNet
+from models.pretrained_models import get_pretrained_resnet18
 from utils.trainer import train, evaluate, set_seed
 from utils.visualization import visualize_results
-from utils.model_utils import count_parameters, save_model, get_optimizer, get_lr_scheduler
+from utils.model_utils import count_parameters, save_model, get_optimizer
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='训练单个模型')
+    parser = argparse.ArgumentParser(description='训练预训练ResNet18模型')
     
     # 模型参数
-    parser.add_argument('--model', type=str, required=True, 
-                        choices=['BasicCNN', 'CNNWithBatchNorm', 'CNNWithDropout', 'ResNet'],
-                        help='要训练的模型类型')
-    parser.add_argument('--num_blocks', type=int, default=2,
-                        help='ResNet的残差块数量')
-    parser.add_argument('--dropout_rate', type=float, default=0.25,
-                        help='Dropout的丢弃率')
+    parser.add_argument('--pretrained', action='store_true', default=True,
+                        help='是否加载预训练权重')
+    parser.add_argument('--finetune_mode', type=str, default='full',
+                        choices=['full', 'last_layer', 'partial'],
+                        help='微调模式: full-全部参数, last_layer-仅最后层, partial-部分层')
     
     # 训练参数
-    parser.add_argument('--epochs', type=int, default=6, 
+    parser.add_argument('--epochs', type=int, default=10, 
                         help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='批量大小')
@@ -54,7 +52,7 @@ def parse_args():
     
     # 自定义命名参数
     parser.add_argument('--model_name', type=str, default=None,
-                        help='保存模型的自定义名称，默认使用模型类型')
+                        help='保存模型的自定义名称，默认基于微调模式自动生成')
     parser.add_argument('--exp_tag', type=str, default='',
                         help='实验标签，会添加到保存文件名中，便于区分不同实验')
     
@@ -71,19 +69,6 @@ def parse_args():
                         help='是否使用CUDA')
     
     return parser.parse_args()
-
-def get_model(model_name, num_blocks=2, dropout_rate=0.25):
-    """根据名称创建模型实例"""
-    if model_name == 'BasicCNN':
-        return BasicCNN()
-    elif model_name == 'CNNWithBatchNorm':
-        return CNNWithBatchNorm()
-    elif model_name == 'CNNWithDropout':
-        return CNNWithDropout(dropout_rate=dropout_rate)
-    elif model_name == 'ResNet':
-        return ResNet(num_blocks=num_blocks)
-    else:
-        raise ValueError(f"不支持的模型类型: {model_name}")
 
 def split_train_val_data(train_dataset, val_ratio=0.1, seed=42):
     """将训练集划分为训练集和验证集"""
@@ -124,13 +109,29 @@ def main():
     from torchvision.datasets import CIFAR10
     import torchvision.transforms as transforms
     
-    transform = transforms.Compose([
+    # 标准化参数
+    # ResNet预训练模型通常使用ImageNet均值和标准差
+    normalize = transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+    )
+    
+    # 训练集变换
+    train_transform = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        normalize,
+    ])
+    
+    # 测试/验证集变换
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        normalize,
     ])
     
     # 加载训练集
-    train_dataset = CIFAR10(root='./data', train=True, download=args.download, transform=transform)
+    train_dataset = CIFAR10(root='./data', train=True, download=args.download, transform=train_transform)
     
     # 是否划分验证集
     train_loader = None
@@ -159,20 +160,32 @@ def main():
         )
     
     # 加载测试集
-    test_loader = get_cifar_loader(root='./data', train=False, 
-                                  batch_size=args.batch_size, 
-                                  download=args.download)
+    test_dataset = CIFAR10(root='./data', train=False, download=args.download, transform=test_transform)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size,
+        shuffle=False, num_workers=2
+    )
     
-    # 创建模型
-    model = get_model(args.model, args.num_blocks, args.dropout_rate)
+    # 创建预训练ResNet18模型
+    model = get_pretrained_resnet18(
+        num_classes=10, 
+        pretrained=args.pretrained,
+        finetune_mode=args.finetune_mode
+    )
     model = model.to(device)
     
-    # 打印模型参数量
-    param_count = count_parameters(model)
-    print(f"模型有 {param_count:.2f}M 参数")
+    # 打印模型参数量和可训练参数量
+    total_params = count_parameters(model)
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
+    print(f"模型总参数量: {total_params:.2f}M")
+    print(f"可训练参数量: {trainable_params:.2f}M")
     
-    # 创建优化器
-    optimizer = get_optimizer(model, args.optimizer, args.lr, args.weight_decay)
+    # 创建优化器 - 只优化可训练参数
+    if args.finetune_mode != 'full':
+        trainable_params = model.get_trainable_parameters()
+        optimizer = get_optimizer(trainable_params, args.optimizer, args.lr, args.weight_decay)
+    else:
+        optimizer = get_optimizer(model, args.optimizer, args.lr, args.weight_decay)
     
     # 创建学习率调度器
     scheduler = None
@@ -187,7 +200,7 @@ def main():
         print(f"使用ReduceLROnPlateau学习率调度器，patience={args.lr_patience}, factor={args.lr_factor}")
     
     # 训练模型
-    print(f"\n{'='*50}\n训练 {args.model}\n{'='*50}")
+    print(f"\n{'='*50}\n训练预训练ResNet18 (微调模式: {args.finetune_mode})\n{'='*50}")
     start_time = time.time()
     
     # 调用训练函数
@@ -219,13 +232,13 @@ def main():
     if args.model_name:
         model_name = args.model_name
     else:
-        model_name = args.model
+        model_name = f"resnet18_pretrained_{args.finetune_mode}"
     
     if args.exp_tag:
         model_name = f"{model_name}_{args.exp_tag}"
-        result_prefix = f"{args.model}_{args.exp_tag}"
+        result_prefix = f"resnet18_{args.finetune_mode}_{args.exp_tag}"
     else:
-        result_prefix = args.model_name
+        result_prefix = f"resnet18_{args.finetune_mode}"
     
     # 可视化训练结果
     visualize_results(train_losses, train_accs, result_prefix, save_dir=image_dir)
@@ -235,11 +248,12 @@ def main():
     
     # 打印结果摘要
     print("\n结果摘要:")
-    print(f"模型: {args.model}")
+    print(f"模型: ResNet18预训练 ({args.finetune_mode}模式微调)")
     if args.exp_tag:
         print(f"实验标签: {args.exp_tag}")
     print(f"优化器: {args.optimizer}, 学习率: {args.lr}, 权重衰减: {args.weight_decay}")
-    print(f"参数量: {param_count:.2f}M")
+    print(f"总参数量: {total_params:.2f}M")
+    print(f"可训练参数量: {trainable_params:.2f}M")
     print(f"训练时间: {training_time:.2f}s")
     if val_loader is not None:
         print(f"最佳验证准确率: {max(val_accs):.2f}%")

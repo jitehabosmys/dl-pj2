@@ -11,7 +11,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def train(model, train_loader, criterion, optimizer, device, epochs=10, scheduler=None):
+def train(model, train_loader, criterion, optimizer, device, epochs=10, scheduler=None, validation_loader=None, patience=5):
     """训练模型
     
     参数:
@@ -22,14 +22,26 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
         device: 计算设备
         epochs: 训练轮数
         scheduler: 学习率调度器（可选）
+        validation_loader: 验证数据加载器（可选）
+        patience: 早停耐心值，连续多少个epoch验证性能未提升则停止训练
     
     返回:
         train_losses: 每个epoch的训练损失列表
         train_accs: 每个epoch的训练准确率列表
+        val_losses: 每个epoch的验证损失列表（如果使用验证集）
+        val_accs: 每个epoch的验证准确率列表（如果使用验证集）
+        best_model_state: 最佳模型状态
     """
     model.train()
     train_losses = []
     train_accs = []
+    val_losses = []
+    val_accs = []
+    
+    # 早停相关变量
+    best_val_loss = float('inf')
+    best_model_state = model.state_dict().copy()
+    early_stopping_counter = 0
     
     for epoch in range(epochs):
         running_loss = 0.0
@@ -70,20 +82,53 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
         train_losses.append(epoch_loss)
         train_accs.append(epoch_acc)
         
-        # 打印当前学习率
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%, LR: {current_lr:.6f}')
+        # 验证集评估
+        if validation_loader is not None:
+            val_loss, val_acc = evaluate(model, validation_loader, criterion, device, desc=f'Validating Epoch {epoch+1}')
+            val_losses.append(val_loss)
+            val_accs.append(val_acc)
+            
+            # 打印当前学习率和验证结果
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Acc: {epoch_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%, LR: {current_lr:.6f}')
+            
+            # 早停逻辑
+            if val_loss < best_val_loss:
+                # 性能提升，保存模型状态
+                print(f'验证损失从 {best_val_loss:.4f} 改善到 {val_loss:.4f}，保存模型状态')
+                best_val_loss = val_loss
+                best_model_state = model.state_dict().copy()
+                early_stopping_counter = 0
+            else:
+                early_stopping_counter += 1
+                print(f'EarlyStopping 计数器: {early_stopping_counter}/{patience}')
+                if early_stopping_counter >= patience:
+                    print(f'Early stopping 在 epoch {epoch+1}')
+                    # 恢复到最佳模型状态
+                    model.load_state_dict(best_model_state)
+                    break
+        else:
+            # 打印当前学习率
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%, LR: {current_lr:.6f}')
         
         # 如果提供了学习率调度器，更新学习率
         if scheduler is not None:
             if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                scheduler.step(epoch_loss)  # 对于ReduceLROnPlateau，需要提供指标
+                scheduler.step(val_loss if validation_loader is not None else epoch_loss)  # 对于ReduceLROnPlateau，需要提供指标
             else:
                 scheduler.step()  # 对于其他调度器，直接step
     
-    return train_losses, train_accs
+    # 如果没有验证集，则保存最后一个epoch的模型状态
+    if validation_loader is None:
+        best_model_state = model.state_dict().copy()
+        
+    if validation_loader is not None:
+        return train_losses, train_accs, val_losses, val_accs, best_model_state
+    else:
+        return train_losses, train_accs, best_model_state
 
-def evaluate(model, test_loader, criterion, device):
+def evaluate(model, test_loader, criterion, device, desc='Evaluating'):
     """评估模型"""
     model.eval()
     test_loss = 0
@@ -91,7 +136,7 @@ def evaluate(model, test_loader, criterion, device):
     total = 0
     
     with torch.no_grad():
-        with tqdm(test_loader, desc='Evaluating') as pbar:
+        with tqdm(test_loader, desc=desc) as pbar:
             for inputs, labels in pbar:
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
@@ -109,6 +154,9 @@ def evaluate(model, test_loader, criterion, device):
     
     avg_loss = test_loss / len(test_loader)
     accuracy = 100. * correct / total
-    print(f'Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.2f}%')
+    
+    # 只有在描述为Evaluating时才打印
+    if desc == 'Evaluating':
+        print(f'Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.2f}%')
     
     return avg_loss, accuracy 

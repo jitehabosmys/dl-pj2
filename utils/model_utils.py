@@ -29,18 +29,31 @@ def load_model(model, model_name, save_dir="results/models"):
         print(f"Model file {model_path} not found")
         return False
 
-def get_optimizer(model, opt_name='adam', lr=0.001, weight_decay=0):
-    """根据名称获取优化器"""
+def get_optimizer(model_or_params, opt_name='adam', lr=0.001, weight_decay=0):
+    """根据名称获取优化器
+    
+    参数:
+        model_or_params: 模型对象或参数列表
+        opt_name: 优化器名称
+        lr: 学习率
+        weight_decay: 权重衰减系数
+    """
     opt_name = opt_name.lower()
     
+    # 判断输入是模型还是参数列表
+    if isinstance(model_or_params, list):
+        params = model_or_params
+    else:
+        params = model_or_params.parameters()
+    
     if opt_name == 'adam':
-        return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
     elif opt_name == 'sgd':
-        return torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
+        return torch.optim.SGD(params, lr=lr, momentum=0.9, weight_decay=weight_decay)
     elif opt_name == 'rmsprop':
-        return torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
+        return torch.optim.RMSprop(params, lr=lr, weight_decay=weight_decay)
     elif opt_name == 'adamw':
-        return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unsupported optimizer: {opt_name}")
 
