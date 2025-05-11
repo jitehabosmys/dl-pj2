@@ -33,3 +33,16 @@ htmlcov/
 # Log files
 *.log
 
+# Dataset files
+data/cifar-10-python.tar.gz
+data/cifar-10-batches-py/
+*.tar.gz
+*.pkl
+*.pt
+*.pth
+*.bin
+
+# 临时文件
+sample.png
+
+
