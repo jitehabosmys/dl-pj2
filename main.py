@@ -24,8 +24,8 @@ def main():
     os.makedirs("results/images", exist_ok=True)
     
     # 加载数据
-    train_loader = get_cifar_loader(root='./data', train=True, batch_size=128, download=False)
-    test_loader = get_cifar_loader(root='./data', train=False, batch_size=128, download=False)
+    train_loader = get_cifar_loader(root='./data', train=True, batch_size=128, download=True)
+    test_loader = get_cifar_loader(root='./data', train=False, batch_size=128, download=True)
     
     # 模型配置
     models = {

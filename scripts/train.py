@@ -50,7 +50,7 @@ def parse_args():
     # 路径参数
     parser.add_argument('--output_dir', type=str, default='results',
                         help='输出目录')
-    parser.add_argument('--download', action='store_true', default=False,
+    parser.add_argument('--download', action='store_true', default=True,
                         help='是否下载数据集')
     
     # 其他参数

@@ -68,7 +68,7 @@ python scripts/train.py --model [MODEL_TYPE] [OPTIONS]
 | `--model_name` | 保存模型的自定义名称 | 模型类型名 |
 | `--exp_tag` | 实验标签，会添加到保存文件名中 | 空 |
 | `--output_dir` | 输出目录 | results |
-| `--download` | 是否下载CIFAR-10数据集 | False |
+| `--download` | 是否下载CIFAR-10数据集 | True |
 | `--seed` | 随机种子 | 42 |
 | `--cuda` | 是否使用CUDA | True |
 

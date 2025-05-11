@@ -39,6 +39,8 @@ def parse_args():
                         help='模型保存目录')
     parser.add_argument('--output_dir', type=str, default='results',
                         help='输出目录（如果需要保存测试结果）')
+    parser.add_argument('--download', action='store_true', default=True,
+                        help='是否下载数据集')
     
     # 其他参数
     parser.add_argument('--seed', type=int, default=42, 
@@ -79,7 +81,7 @@ def main():
     # 加载测试数据
     test_loader = get_cifar_loader(root='./data', train=False, 
                                   batch_size=args.batch_size, 
-                                  download=False)
+                                  download=args.download)
     
     if args.model_name:
         model_name = args.model_name
