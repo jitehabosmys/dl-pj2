@@ -10,47 +10,39 @@ import random
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.loaders import get_cifar_loader
-from models.cifar_net import BasicCNN, CNNWithBatchNorm, CNNWithDropout, ResNet
+from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm
 from utils.trainer import train, evaluate, set_seed
 from utils.visualization import visualize_results
-from utils.model_utils import count_parameters, save_model, get_optimizer, get_lr_scheduler
+from utils.model_utils import count_parameters, save_model, get_optimizer
 
 def parse_args():
     parser = argparse.ArgumentParser(description='训练单个模型')
     
     # 模型参数
     parser.add_argument('--model', type=str, required=True, 
-                        choices=['BasicCNN', 'CNNWithBatchNorm', 'CNNWithDropout', 'ResNet'],
+                        choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm'],
                         help='要训练的模型类型')
-    parser.add_argument('--num_blocks', type=int, default=2,
-                        help='ResNet的残差块数量')
-    parser.add_argument('--dropout_rate', type=float, default=0.25,
-                        help='Dropout的丢弃率')
     
     # 训练参数
-    parser.add_argument('--epochs', type=int, default=6, 
+    parser.add_argument('--epochs', type=int, default=200, 
                         help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='批量大小')
     parser.add_argument('--validation_split', type=float, default=0.1,
                         help='验证集比例，设为0则不使用验证集')
-    parser.add_argument('--patience', type=int, default=5, 
+    parser.add_argument('--patience', type=int, default=20, 
                         help='早停耐心值，连续多少个epoch验证性能未提升则停止训练')
     
     # 优化参数
-    parser.add_argument('--optimizer', type=str, default='adam',
+    parser.add_argument('--optimizer', type=str, default='sgd',
                         choices=['adam', 'sgd', 'rmsprop', 'adamw'],
                         help='优化器类型')
-    parser.add_argument('--lr', type=float, default=0.001, 
+    parser.add_argument('--lr', type=float, default=0.1, 
                         help='学习率')
-    parser.add_argument('--weight_decay', type=float, default=1e-5,
+    parser.add_argument('--weight_decay', type=float, default=5e-4,
                         help='权重衰减系数（L2正则化）')
-    parser.add_argument('--lr_scheduler', action='store_true', default=True,
-                        help='是否使用学习率调度器(ReduceLROnPlateau)')
-    parser.add_argument('--lr_patience', type=int, default=2,
-                        help='学习率调度器的耐心值，验证损失多少个epoch未改善则降低学习率')
-    parser.add_argument('--lr_factor', type=float, default=0.1,
-                        help='学习率调度器的降低因子')
+    parser.add_argument('--momentum', type=float, default=0.9,
+                        help='SGD动量值(仅用于SGD优化器)')
     
     # 自定义命名参数
     parser.add_argument('--model_name', type=str, default=None,
@@ -72,16 +64,16 @@ def parse_args():
     
     return parser.parse_args()
 
-def get_model(model_name, num_blocks=2, dropout_rate=0.25):
+def get_model(model_name):
     """根据名称创建模型实例"""
     if model_name == 'BasicCNN':
         return BasicCNN()
-    elif model_name == 'CNNWithBatchNorm':
-        return CNNWithBatchNorm()
-    elif model_name == 'CNNWithDropout':
-        return CNNWithDropout(dropout_rate=dropout_rate)
-    elif model_name == 'ResNet':
-        return ResNet(num_blocks=num_blocks)
+    elif model_name == 'ResNet18':
+        return ResNet18()
+    elif model_name == 'VGG_A':
+        return VGG_A()
+    elif model_name == 'VGG_A_BatchNorm':
+        return VGG_A_BatchNorm()
     else:
         raise ValueError(f"不支持的模型类型: {model_name}")
 
@@ -124,13 +116,21 @@ def main():
     from torchvision.datasets import CIFAR10
     import torchvision.transforms as transforms
     
-    transform = transforms.Compose([
+    # CIFAR-10精确的归一化参数
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),  # 添加数据增强
+        transforms.RandomHorizontalFlip(),      # 添加数据增强
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+    ])
+    
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
     ])
     
     # 加载训练集
-    train_dataset = CIFAR10(root='./data', train=True, download=args.download, transform=transform)
+    train_dataset = CIFAR10(root='./data', train=True, download=args.download, transform=transform_train)
     
     # 是否划分验证集
     train_loader = None
@@ -159,32 +159,31 @@ def main():
         )
     
     # 加载测试集
-    test_loader = get_cifar_loader(root='./data', train=False, 
-                                  batch_size=args.batch_size, 
-                                  download=args.download)
+    test_dataset = CIFAR10(root='./data', train=False, download=args.download, transform=transform_test)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size,
+        shuffle=False, num_workers=2
+    )
     
     # 创建模型
-    model = get_model(args.model, args.num_blocks, args.dropout_rate)
+    model = get_model(args.model)
     model = model.to(device)
     
     # 打印模型参数量
     param_count = count_parameters(model)
     print(f"模型有 {param_count:.2f}M 参数")
     
-    # 创建优化器
-    optimizer = get_optimizer(model, args.optimizer, args.lr, args.weight_decay)
+    # 创建优化器（根据参数）
+    if args.optimizer.lower() == 'sgd':
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, 
+                                   momentum=args.momentum, 
+                                   weight_decay=args.weight_decay)
+    else:
+        optimizer = get_optimizer(model, args.optimizer, args.lr, args.weight_decay)
     
-    # 创建学习率调度器
-    scheduler = None
-    if args.lr_scheduler and args.validation_split > 0:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 
-            mode='min',               # 监控验证损失最小化
-            factor=args.lr_factor,    # 降低学习率的因子
-            patience=args.lr_patience,# 多少个epoch没有改善则降低学习率
-            min_lr=1e-6               # 学习率下限
-        )
-        print(f"使用ReduceLROnPlateau学习率调度器，patience={args.lr_patience}, factor={args.lr_factor}")
+    # 创建学习率调度器 - 使用CosineAnnealingLR
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
     
     # 训练模型
     print(f"\n{'='*50}\n训练 {args.model}\n{'='*50}")
