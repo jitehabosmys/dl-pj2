@@ -1,0 +1,35 @@
+# Python缓存和字节码
+__pycache__/
+*.py[cod]
+
+# 构建产物
+build/
+dist/
+*.egg-info/
+
+# 虚拟环境
+.venv/
+env/
+venv/
+ENV/
+
+# 大型数据文件（可根据项目需求调整）
+*.csv
+*.tsv
+*.json
+*.h5
+*.pkl
+*.pt
+*.pth
+*.ckpt
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+logs/ 
