@@ -13,7 +13,7 @@ from data.loaders import get_cifar_loader
 from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm
 from utils.trainer import train, evaluate, set_seed
 from utils.visualization import visualize_results
-from utils.model_utils import count_parameters, save_model, get_optimizer
+from utils.model_utils import count_parameters, save_model, get_optimizer, load_model
 
 def parse_args():
     parser = argparse.ArgumentParser(description='训练单个模型')
@@ -22,6 +22,12 @@ def parse_args():
     parser.add_argument('--model', type=str, required=True, 
                         choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm'],
                         help='要训练的模型类型')
+    
+    # 加载预训练模型参数
+    parser.add_argument('--resume', type=str, default=None,
+                        help='指定要加载的预训练模型文件名（不包含.pth扩展名），用于继续训练')
+    parser.add_argument('--model_dir', type=str, default='results/models',
+                        help='模型加载和保存目录')
     
     # 训练参数
     parser.add_argument('--epochs', type=int, default=200, 
@@ -169,6 +175,15 @@ def main():
     model = get_model(args.model)
     model = model.to(device)
     
+    # 如果指定了预训练模型，则加载
+    if args.resume:
+        print(f"尝试加载预训练模型: {args.resume}")
+        load_success = load_model(model, args.resume, save_dir=args.model_dir)
+        if load_success:
+            print(f"成功加载预训练模型，继续训练...")
+        else:
+            print(f"无法加载预训练模型，将从头开始训练...")
+    
     # 打印模型参数量
     param_count = count_parameters(model)
     print(f"模型有 {param_count:.2f}M 参数")
@@ -224,7 +239,7 @@ def main():
         model_name = f"{model_name}_{args.exp_tag}"
         result_prefix = f"{args.model}_{args.exp_tag}"
     else:
-        result_prefix = args.model_name
+        result_prefix = args.model_name if args.model_name else args.model
     
     # 可视化训练结果
     visualize_results(train_losses, train_accs, result_prefix, save_dir=image_dir)
@@ -235,6 +250,8 @@ def main():
     # 打印结果摘要
     print("\n结果摘要:")
     print(f"模型: {args.model}")
+    if args.resume:
+        print(f"从预训练模型继续: {args.resume}")
     if args.exp_tag:
         print(f"实验标签: {args.exp_tag}")
     print(f"优化器: {args.optimizer}, 学习率: {args.lr}, 权重衰减: {args.weight_decay}")
