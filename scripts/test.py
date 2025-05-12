@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.loaders import get_cifar_loader
-from models.cifar_net import BasicCNN, CNNWithBatchNorm, CNNWithDropout, ResNet
+from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18
 from utils.trainer import evaluate, set_seed
 from utils.model_utils import load_model, count_parameters
 
@@ -17,12 +17,8 @@ def parse_args():
     
     # 模型参数
     parser.add_argument('--model', type=str, required=True, 
-                        choices=['BasicCNN', 'CNNWithBatchNorm', 'CNNWithDropout', 'ResNet'],
+                        choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm', 'PreActResNet18'],
                         help='要测试的模型类型')
-    parser.add_argument('--num_blocks', type=int, default=2,
-                        help='ResNet的残差块数量')
-    parser.add_argument('--dropout_rate', type=float, default=0.25,
-                        help='Dropout的丢弃率')
     
     # 测试参数
     parser.add_argument('--batch_size', type=int, default=128, 
@@ -54,16 +50,18 @@ def parse_args():
     
     return parser.parse_args()
 
-def get_model(model_name, num_blocks=2, dropout_rate=0.25):
+def get_model(model_name):
     """根据名称创建模型实例"""
     if model_name == 'BasicCNN':
         return BasicCNN()
-    elif model_name == 'CNNWithBatchNorm':
-        return CNNWithBatchNorm()
-    elif model_name == 'CNNWithDropout':
-        return CNNWithDropout(dropout_rate=dropout_rate)
-    elif model_name == 'ResNet':
-        return ResNet(num_blocks=num_blocks)
+    elif model_name == 'ResNet18':
+        return ResNet18()
+    elif model_name == 'VGG_A':
+        return VGG_A()
+    elif model_name == 'VGG_A_BatchNorm':
+        return VGG_A_BatchNorm()
+    elif model_name == 'PreActResNet18':
+        return PreActResNet18()
     else:
         raise ValueError(f"不支持的模型类型: {model_name}")
 
@@ -78,10 +76,22 @@ def main():
     device = torch.device("cuda" if args.cuda and torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
     
-    # 加载测试数据
-    test_loader = get_cifar_loader(root='./data', train=False, 
-                                  batch_size=args.batch_size, 
-                                  download=args.download)
+    # 准备数据集和数据加载器
+    from torchvision.datasets import CIFAR10
+    import torchvision.transforms as transforms
+    
+    # CIFAR-10精确的归一化参数
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+    ])
+    
+    # 加载测试集
+    test_dataset = CIFAR10(root='./data', train=False, download=args.download, transform=transform_test)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size,
+        shuffle=False, num_workers=2
+    )
     
     if args.model_name:
         model_name = args.model_name
@@ -89,7 +99,7 @@ def main():
         model_name = args.model
     
     # 创建模型实例
-    model = get_model(args.model, args.num_blocks, args.dropout_rate)
+    model = get_model(args.model)
     
     # 加载预训练权重
     load_success = load_model(model, model_name, save_dir=args.model_dir)
@@ -116,6 +126,8 @@ def main():
     # 打印结果
     print("\n测试结果:")
     print(f"模型: {args.model}")
+    if args.result_tag:
+        print(f"结果标签: {args.result_tag}")
     print(f"测试准确率: {test_acc:.2f}%")
     print(f"测试损失: {test_loss:.4f}")
 

@@ -10,7 +10,7 @@ import random
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.loaders import get_cifar_loader
-from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm
+from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18
 from utils.trainer import train, evaluate, set_seed
 from utils.visualization import visualize_results
 from utils.model_utils import count_parameters, save_model, get_optimizer, load_model
@@ -20,7 +20,7 @@ def parse_args():
     
     # 模型参数
     parser.add_argument('--model', type=str, required=True, 
-                        choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm'],
+                        choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm', 'PreActResNet18'],
                         help='要训练的模型类型')
     
     # 加载预训练模型参数
@@ -80,6 +80,8 @@ def get_model(model_name):
         return VGG_A()
     elif model_name == 'VGG_A_BatchNorm':
         return VGG_A_BatchNorm()
+    elif model_name == 'PreActResNet18':
+        return PreActResNet18()
     else:
         raise ValueError(f"不支持的模型类型: {model_name}")
 
