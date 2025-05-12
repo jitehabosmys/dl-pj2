@@ -102,10 +102,19 @@ def main():
     model = get_model(args.model)
     
     # 加载预训练权重
-    load_success = load_model(model, model_name, save_dir=args.model_dir)
+    load_success, checkpoint = load_model(model, model_name, save_dir=args.model_dir)
     if not load_success:
         print(f"无法加载模型，请先训练模型或检查模型文件路径。")
         return
+    
+    # 提取和打印额外信息（如果有）
+    if checkpoint is not None and args.verbose:
+        epoch = checkpoint.get('epoch', None)
+        acc = checkpoint.get('acc', None)
+        if epoch is not None:
+            print(f"模型在第 {epoch} 轮保存")
+        if acc is not None:
+            print(f"保存时的准确率: {acc:.2f}%")
     
     # 将模型移至设备并设置为评估模式
     model = model.to(device)

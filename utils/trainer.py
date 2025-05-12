@@ -11,7 +11,7 @@ def set_seed(seed=42):
     # torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-def train(model, train_loader, criterion, optimizer, device, epochs=10, scheduler=None, validation_loader=None, patience=5):
+def train(model, train_loader, criterion, optimizer, device, epochs=10, scheduler=None, validation_loader=None, patience=5, best_val_loss=float('inf')):
     """训练模型
     
     参数:
@@ -24,6 +24,7 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
         scheduler: 学习率调度器（可选）
         validation_loader: 验证数据加载器（可选）
         patience: 早停耐心值，连续多少个epoch验证性能未提升则停止训练
+        best_val_loss: 初始最佳验证损失（用于恢复训练）
     
     返回:
         train_losses: 每个epoch的训练损失列表
@@ -39,7 +40,6 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
     val_accs = []
     
     # 早停相关变量
-    best_val_loss = float('inf')
     best_model_state = model.state_dict().copy()
     early_stopping_counter = 0
     

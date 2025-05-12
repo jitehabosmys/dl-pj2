@@ -31,7 +31,7 @@ def parse_args():
     
     # 训练参数
     parser.add_argument('--epochs', type=int, default=200, 
-                        help='训练轮数')
+                        help='训练轮数（如果使用--resume，则表示额外训练的轮数）')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='批量大小')
     parser.add_argument('--validation_split', type=float, default=0.1,
@@ -129,12 +129,12 @@ def main():
         transforms.RandomCrop(32, padding=4),  # 添加数据增强
         transforms.RandomHorizontalFlip(),      # 添加数据增强
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
     
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
     
     # 加载训练集
@@ -177,15 +177,6 @@ def main():
     model = get_model(args.model)
     model = model.to(device)
     
-    # 如果指定了预训练模型，则加载
-    if args.resume:
-        print(f"尝试加载预训练模型: {args.resume}")
-        load_success = load_model(model, args.resume, save_dir=args.model_dir)
-        if load_success:
-            print(f"成功加载预训练模型，继续训练...")
-        else:
-            print(f"无法加载预训练模型，将从头开始训练...")
-    
     # 打印模型参数量
     param_count = count_parameters(model)
     print(f"模型有 {param_count:.2f}M 参数")
@@ -198,9 +189,42 @@ def main():
     else:
         optimizer = get_optimizer(model, args.optimizer, args.lr, args.weight_decay)
     
+    # 初始epoch和最佳准确率
+    start_epoch = 0
+    best_acc = 0
+    best_val_loss = float('inf')
+    
     # 创建学习率调度器 - 使用CosineAnnealingLR
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
+    
+    # 如果指定了预训练模型，则加载
+    if args.resume:
+        print(f"尝试加载预训练模型: {args.resume}")
+        load_success, checkpoint = load_model(model, args.resume, optimizer, scheduler, save_dir=args.model_dir)
+        if load_success:
+            if checkpoint is not None:
+                if 'epoch' in checkpoint:
+                    start_epoch = checkpoint['epoch'] + 1  # 从下一个epoch开始
+                    print(f"继续从epoch {start_epoch}开始训练")
+                if 'acc' in checkpoint:
+                    best_acc = checkpoint['acc']
+                    print(f"加载的最佳准确率: {best_acc:.2f}%")
+                if 'best_val_loss' in checkpoint:
+                    best_val_loss = checkpoint['best_val_loss']
+                    print(f"加载的最佳验证损失: {best_val_loss:.4f}")
+                
+                # 在resume模式下，更新学习率调度器的T_max
+                if isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
+                    scheduler.T_max = start_epoch + args.epochs
+                    print(f"更新学习率调度器：T_max={scheduler.T_max}")
+            print(f"成功加载预训练模型，继续训练...")
+        else:
+            print(f"无法加载预训练模型，将从头开始训练...")
+    else:
+        # 非resume模式，设置学习率调度器的T_max
+        if isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
+            scheduler.T_max = args.epochs
     
     # 训练模型
     print(f"\n{'='*50}\n训练 {args.model}\n{'='*50}")
@@ -209,10 +233,11 @@ def main():
     # 调用训练函数
     train_results = train(
         model, train_loader, criterion=nn.CrossEntropyLoss(), 
-        optimizer=optimizer, device=device, epochs=args.epochs,
+        optimizer=optimizer, device=device, epochs=args.epochs,  # 不再减去start_epoch，直接使用args.epochs
         validation_loader=val_loader,
         patience=args.patience,
-        scheduler=scheduler
+        scheduler=scheduler,
+        best_val_loss=best_val_loss  # 传入已有的最佳验证损失
     )
     
     # 提取训练结果
@@ -246,8 +271,17 @@ def main():
     # 可视化训练结果
     visualize_results(train_losses, train_accs, result_prefix, save_dir=image_dir)
     
+    # 计算当前训练完的总epoch数
+    current_epoch = start_epoch + len(train_losses) - 1
+    
+    # 获取最终的最佳验证损失
+    final_best_val_loss = best_val_loss
+    if val_loader is not None and len(val_losses) > 0:
+        min_val_loss_idx = val_losses.index(min(val_losses))
+        final_best_val_loss = val_losses[min_val_loss_idx]
+    
     # 保存模型
-    save_model(model, model_name, save_dir=model_dir)
+    save_model(model, model_name, optimizer, scheduler, current_epoch, test_acc, final_best_val_loss, save_dir=model_dir)
     
     # 打印结果摘要
     print("\n结果摘要:")

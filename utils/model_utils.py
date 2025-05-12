@@ -6,28 +6,83 @@ def count_parameters(model):
     """计算模型参数量"""
     return sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6  # 单位：百万
 
-def save_model(model, model_name, save_dir="results/models"):
-    """保存模型"""
+def save_model(model, model_name, optimizer=None, scheduler=None, epoch=None, best_acc=None, best_val_loss=None, save_dir="results/models"):
+    """保存模型和训练状态
+    
+    参数:
+        model: 模型对象
+        model_name: 模型名称
+        optimizer: 优化器
+        scheduler: 学习率调度器
+        epoch: 当前训练轮次
+        best_acc: 最佳准确率
+        best_val_loss: 最佳验证损失
+        save_dir: 保存目录
+    """
     # 如果指定的文件夹不存在，则创建它
     os.makedirs(save_dir, exist_ok=True)
     
+    # 准备保存的状态字典
+    state = {
+        'net': model.state_dict(),
+        'epoch': epoch,
+        'acc': best_acc,
+        'best_val_loss': best_val_loss
+    }
+    
+    # 如果提供了优化器，保存其状态
+    if optimizer is not None:
+        state['optimizer'] = optimizer.state_dict()
+    
+    # 如果提供了学习率调度器，保存其状态
+    if scheduler is not None:
+        state['scheduler'] = scheduler.state_dict()
+    
     # 将模型保存在指定的文件夹路径下
     model_path = os.path.join(save_dir, f'{model_name}.pth')
-    torch.save(model.state_dict(), model_path)
+    torch.save(state, model_path)
     
-    print(f"Model saved to {model_path}")
+    print(f"模型和训练状态保存到 {model_path}")
 
-def load_model(model, model_name, save_dir="results/models"):
-    """加载预训练模型"""
+def load_model(model, model_name, optimizer=None, scheduler=None, save_dir="results/models"):
+    """加载预训练模型和训练状态
+    
+    参数:
+        model: 模型对象
+        model_name: 模型名称
+        optimizer: 优化器（可选）
+        scheduler: 学习率调度器（可选）
+        save_dir: 保存目录
+        
+    返回:
+        success: 是否成功加载
+        state: 加载的状态字典
+    """
     model_path = os.path.join(save_dir, f'{model_name}.pth')
     
     if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path))
-        print(f"Model loaded from {model_path}")
-        return True
+        checkpoint = torch.load(model_path)
+        
+        # 加载模型权重
+        if 'net' in checkpoint:
+            model.load_state_dict(checkpoint['net'])
+        else:
+            # 向后兼容旧格式的保存文件
+            model.load_state_dict(checkpoint)
+        
+        # 加载优化器状态（如果提供）
+        if optimizer is not None and 'optimizer' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        
+        # 加载学习率调度器状态（如果提供）
+        if scheduler is not None and 'scheduler' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler'])
+        
+        print(f"模型和训练状态从 {model_path} 加载完成")
+        return True, checkpoint
     else:
-        print(f"Model file {model_path} not found")
-        return False
+        print(f"模型文件 {model_path} 未找到")
+        return False, None
 
 def get_optimizer(model_or_params, opt_name='adam', lr=0.001, weight_decay=0):
     """根据名称获取优化器
