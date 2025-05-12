@@ -47,5 +47,5 @@ data/cifar-10-batches-py/
 *.png
 
 # 参考文件
-pytorch-cifar-master/
+# pytorch-cifar-master/
 
