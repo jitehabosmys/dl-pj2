@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from torchvision.models import ResNet18_Weights
 
 class PretrainedResNet18(nn.Module):
     """使用预训练的ResNet18模型，并适配CIFAR-10数据集
@@ -13,7 +14,11 @@ class PretrainedResNet18(nn.Module):
         super(PretrainedResNet18, self).__init__()
         
         # 加载预训练的ResNet18模型
-        self.model = models.resnet18(pretrained=pretrained)
+        if pretrained:
+            weights = ResNet18_Weights.IMAGENET1K_V1
+        else:
+            weights = None
+        self.model = models.resnet18(weights=weights)
         
         # 调整第一个卷积层以适应CIFAR-10的32x32图像
         self.model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
