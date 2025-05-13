@@ -160,17 +160,30 @@ def main():
     use_wandb = args.use_wandb
     if use_wandb:
         try:
+            # 检测是否为Kaggle环境
+            is_kaggle = os.path.exists("/kaggle/input")
+            anonymous = None
+            
+            if is_kaggle:
+                print("检测到Kaggle环境，尝试从secrets获取wandb API密钥")
+                try:
+                    from kaggle_secrets import UserSecretsClient
+                    user_secrets = UserSecretsClient()
+                    secret_value = user_secrets.get_secret("wandb_api")
+                    wandb.login(key=secret_value)
+                    print("成功从Kaggle secrets获取wandb API密钥")
+                except Exception as e:
+                    print(f"无法从Kaggle secrets获取wandb API密钥: {e}")
+                    print("如果要使用您的W&B账户，请前往Kaggle的Add-ons -> Secrets，提供您的W&B访问令牌。使用标签名称'wandb_api'。")
+                    print("从这里获取您的W&B访问令牌: https://wandb.ai/authorize")
+                    anonymous = "must"
+            
             # 确定run名称
             run_name = args.wandb_run_name
             if run_name is None:
                 run_name = args.model_name if args.model_name else args.model
                 if args.exp_tag:
                     run_name = f"{run_name}_{args.exp_tag}"
-            
-            # 检测是否为Kaggle环境
-            is_kaggle = os.path.exists("/kaggle/input")
-            if is_kaggle:
-                print("检测到Kaggle环境，确保您已添加wandb API密钥")
             
             # 初始化wandb
             wandb.init(
@@ -190,7 +203,8 @@ def main():
                     "resume": args.resume,
                     "exp_tag": args.exp_tag,
                     "is_kaggle": is_kaggle
-                }
+                },
+                anonymous=anonymous
             )
             print(f"成功初始化wandb，项目名称: PJ2, 运行名称: {run_name}")
         except Exception as e:
