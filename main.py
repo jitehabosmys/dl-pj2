@@ -190,6 +190,28 @@ print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
 # 初始化wandb（如果指定）
 if args.use_wandb:
     try:
+        # 检测是否为Kaggle环境
+        is_kaggle = os.path.exists("/kaggle/input")
+        anonymous = None
+        
+        # 设置wandb环境变量（适用于Kaggle）
+        if is_kaggle:
+            os.environ["WANDB_CONSOLE"] = "off"  # 在Kaggle上禁用特殊的console输出
+            os.environ["WANDB_SILENT"] = "true"  # 减少一些非必要输出
+            print("检测到Kaggle环境，尝试从secrets获取wandb API密钥")
+            
+            try:
+                from kaggle_secrets import UserSecretsClient
+                user_secrets = UserSecretsClient()
+                secret_value = user_secrets.get_secret("wandb_api")
+                wandb.login(key=secret_value)
+                print("成功从Kaggle secrets获取wandb API密钥")
+            except Exception as e:
+                print(f"无法从Kaggle secrets获取wandb API密钥: {e}")
+                print("如果要使用您的W&B账户，请前往Kaggle的Add-ons -> Secrets，提供您的W&B访问令牌。使用标签名称'wandb_api'。")
+                print("从这里获取您的W&B访问令牌: https://wandb.ai/authorize")
+                anonymous = "must"
+        
         # 确定run名称
         run_name = args.wandb_run_name
         if run_name is None:
@@ -211,8 +233,10 @@ if args.use_wandb:
                 "resume": args.resume,
                 "save_name": args.save_name,
                 "pretrained": args.pretrained,
-                "finetune_mode": args.finetune_mode if args.model == 'PretrainedResNet18' else None
-            }
+                "finetune_mode": args.finetune_mode if args.model == 'PretrainedResNet18' else None,
+                "is_kaggle": is_kaggle if 'is_kaggle' in locals() else False
+            },
+            anonymous=anonymous
         )
         print(f"成功初始化wandb，项目名称: cifar-pj, 运行名称: {run_name}")
         
