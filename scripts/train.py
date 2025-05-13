@@ -15,7 +15,7 @@ import itertools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.loaders import get_cifar_loader
-from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18
+from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18, PretrainedResNet18, get_pretrained_resnet18
 from utils.trainer import train, evaluate, set_seed
 from utils.visualization import visualize_results
 from utils.model_utils import count_parameters, save_model, get_optimizer, load_model
@@ -25,7 +25,7 @@ def parse_args():
     
     # 模型参数
     parser.add_argument('--model', type=str, required=True, 
-                        choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm', 'PreActResNet18'],
+                        choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm', 'PreActResNet18', 'PretrainedResNet18'],
                         help='要训练的模型类型')
     
     # 加载预训练模型参数
@@ -79,9 +79,16 @@ def parse_args():
     parser.add_argument('--cuda', action='store_true', default=True,
                         help='是否使用CUDA')
     
+    # 预训练ResNet18特有参数
+    parser.add_argument('--pretrained', action='store_true', default=True,
+                        help='是否使用预训练权重(仅对PretrainedResNet18有效)')
+    parser.add_argument('--finetune_mode', type=str, default='full',
+                        choices=['full', 'last'],
+                        help='微调模式: full(训练整个网络)或last(仅训练最后一层)')
+    
     return parser.parse_args()
 
-def get_model(model_name):
+def get_model(model_name, pretrained=True, finetune_mode='full'):
     """根据名称创建模型实例"""
     if model_name == 'BasicCNN':
         return BasicCNN()
@@ -93,6 +100,8 @@ def get_model(model_name):
         return VGG_A_BatchNorm()
     elif model_name == 'PreActResNet18':
         return PreActResNet18()
+    elif model_name == 'PretrainedResNet18':
+        return get_pretrained_resnet18(pretrained=pretrained, finetune_mode=finetune_mode)
     else:
         raise ValueError(f"不支持的模型类型: {model_name}")
 
@@ -202,7 +211,9 @@ def main():
                     "patience": args.patience,
                     "resume": args.resume,
                     "exp_tag": args.exp_tag,
-                    "is_kaggle": is_kaggle
+                    "is_kaggle": is_kaggle,
+                    "pretrained": args.pretrained,
+                    "finetune_mode": args.finetune_mode
                 },
                 anonymous=anonymous
             )
@@ -270,7 +281,7 @@ def main():
     )
     
     # 创建模型
-    model = get_model(args.model)
+    model = get_model(args.model, pretrained=args.pretrained, finetune_mode=args.finetune_mode)
     model = model.to(device)
     
     # 打印模型参数量
