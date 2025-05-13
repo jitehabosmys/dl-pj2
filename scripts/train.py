@@ -326,8 +326,16 @@ def main():
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
         print(f"使用MultiStepLR学习率调度器，里程碑={milestones}, gamma=0.1")
     else:  # plateau
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
-        print(f"使用ReduceLROnPlateau学习率调度器，factor=0.1, patience=10")
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 
+            mode='min',
+            factor=0.1,      # 保持0.1的降低比例
+            patience=15,     # 调整为15轮
+            threshold=0.005, # 添加阈值参数
+            cooldown=5,      # 添加冷却期
+            min_lr=1e-5      # 设置最小学习率
+)
+        print(f"使用ReduceLROnPlateau学习率调度器，factor=0.1, patience=15")
     
     # 如果指定了预训练模型，则加载
     if args.resume:
