@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 import itertools
+import torch.backends.cudnn as cudnn
 
 # 添加项目根目录到系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -292,7 +293,13 @@ def main():
     # 创建模型
     model = get_model(args.model, pretrained=args.pretrained, finetune_mode=args.finetune_mode)
     model = model.to(device)
-    
+
+    # 添加DataParallel支持
+    if device.type == 'cuda':
+        model = torch.nn.DataParallel(model)
+        cudnn.benchmark = True
+        print("使用DataParallel进行多GPU训练")
+
     # 打印模型参数量
     param_count = count_parameters(model)
     print(f"模型有 {param_count:.2f}M 参数")

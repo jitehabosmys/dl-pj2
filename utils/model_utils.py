@@ -63,12 +63,20 @@ def load_model(model, model_name, optimizer=None, scheduler=None, save_dir="resu
     if os.path.exists(model_path):
         checkpoint = torch.load(model_path)
         
+        # 修复键名：去除 `module.` 前缀（兼容 DataParallel 保存的模型）
+        def fix_state_dict(state_dict):
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k.replace("module.", "")  # 关键修复：去掉前缀
+                new_state_dict[name] = v
+            return new_state_dict
+        
         # 加载模型权重
         if 'net' in checkpoint:
-            model.load_state_dict(checkpoint['net'])
+            model.load_state_dict(fix_state_dict(checkpoint['net']))  # 应用修复
         else:
-            # 向后兼容旧格式的保存文件
-            model.load_state_dict(checkpoint)
+            # 处理旧格式的保存文件（同样需要修复键名）
+            model.load_state_dict(fix_state_dict(checkpoint))         # 应用修复
         
         # 加载优化器状态（如果提供）
         if optimizer is not None and 'optimizer' in checkpoint:
