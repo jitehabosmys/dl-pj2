@@ -95,7 +95,6 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
                 pbar.set_postfix({
                     'loss': f'{running_loss/len(pbar):.4f}',
                     'acc': f'{100.*correct/total:.2f}%',
-                    'grad_norm': f'{grad_norm:.4f}'
                 })
         
         # 计算每个epoch的平均梯度范数
@@ -179,9 +178,6 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
             current_lr = optimizer.param_groups[0]['lr']
             print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%, LR: {current_lr:.6f}')
         
-        # 打印梯度范数和学习率信息
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f"梯度范数: {epoch_grad_norm:.6f}, 学习率: {current_lr:.6f}")
         
         # 记录wandb指标
         if use_wandb:
