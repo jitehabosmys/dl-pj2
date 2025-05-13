@@ -35,13 +35,13 @@ def parse_args():
                         help='模型加载和保存目录')
     
     # 训练参数
-    parser.add_argument('--epochs', type=int, default=200, 
+    parser.add_argument('--epochs', type=int, default=300, 
                         help='训练轮数（如果使用--resume，则表示额外训练的轮数）')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='批量大小')
     parser.add_argument('--validation_split', type=float, default=0.1,
                         help='验证集比例，设为0则不使用验证集')
-    parser.add_argument('--patience', type=int, default=20, 
+    parser.add_argument('--patience', type=int, default=30, 
                         help='早停耐心值，连续多少个epoch验证性能未提升则停止训练')
     
     # 优化参数
@@ -54,6 +54,13 @@ def parse_args():
                         help='权重衰减系数（L2正则化）')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='SGD动量值(仅用于SGD优化器)')
+    
+    # 学习率调度器参数
+    parser.add_argument('--lr_scheduler', type=str, default='multistep',
+                      choices=['cosine', 'multistep', 'plateau'],
+                      help='学习率调度器类型')
+    parser.add_argument('--milestones', type=str, default='150,225,270',
+                      help='MultiStepLR的里程碑(epoch)，用逗号分隔')
     
     # 自定义命名参数
     parser.add_argument('--model_name', type=str, default=None,
@@ -213,7 +220,9 @@ def main():
                     "exp_tag": args.exp_tag,
                     "is_kaggle": is_kaggle,
                     "pretrained": args.pretrained,
-                    "finetune_mode": args.finetune_mode
+                    "finetune_mode": args.finetune_mode,
+                    "lr_scheduler": args.lr_scheduler,
+                    "milestones": args.milestones if args.lr_scheduler == 'multistep' else None
                 },
                 anonymous=anonymous
             )
@@ -308,9 +317,17 @@ def main():
     best_acc = 0
     best_val_loss = float('inf')
     
-    # 创建学习率调度器 - 使用CosineAnnealingLR
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
+    # 创建学习率调度器
+    if args.lr_scheduler == 'cosine':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+        print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
+    elif args.lr_scheduler == 'multistep':
+        milestones = [int(m) for m in args.milestones.split(',')]
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+        print(f"使用MultiStepLR学习率调度器，里程碑={milestones}, gamma=0.1")
+    else:  # plateau
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
+        print(f"使用ReduceLROnPlateau学习率调度器，factor=0.1, patience=10")
     
     # 如果指定了预训练模型，则加载
     if args.resume:
