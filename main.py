@@ -13,10 +13,13 @@ import time
 import random
 import numpy as np
 import multiprocessing
+import wandb  # 导入wandb
 
 # 导入自定义模块
 from data.loaders import get_cifar_loader
 from models.preact_resnet18 import PreActResNet18
+# 导入更多模型
+from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PretrainedResNet18, get_pretrained_resnet18
 from utils.model_utils import count_parameters, save_model
 
 # 定义进度条函数
@@ -37,6 +40,21 @@ parser.add_argument('--epochs', type=int, default=200, help='total epochs to run
 parser.add_argument('--batch_size', type=int, default=128, help='mini-batch size')
 parser.add_argument('--patience', type=int, default=20, help='early stopping patience (number of epochs)')
 parser.add_argument('--save_name', type=str, default='ckpt', help='保存的模型文件名，不需要添加.pth后缀')
+# 添加模型选择参数
+parser.add_argument('--model', type=str, default='PreActResNet18', 
+                    choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm', 'PreActResNet18', 'PretrainedResNet18'],
+                    help='要训练的模型类型')
+# 添加预训练模型参数
+parser.add_argument('--pretrained', action='store_true', default=False,
+                    help='是否使用预训练权重(仅对PretrainedResNet18有效)')
+parser.add_argument('--finetune_mode', type=str, default='full',
+                    choices=['full', 'last'],
+                    help='微调模式: full(训练整个网络)或last(仅训练最后一层)')
+# 添加wandb参数
+parser.add_argument('--use_wandb', action='store_true', default=False,
+                    help='是否使用wandb进行可视化')
+parser.add_argument('--wandb_run_name', type=str, default=None,
+                    help='wandb运行名称，默认使用模型名称')
 args = parser.parse_args()
 
 # 设置设备
@@ -120,9 +138,31 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer',
 
 # 构建模型
 print('==> 构建模型..')
-net = PreActResNet18()
+
+# 根据参数选择模型
+def get_model(model_name, pretrained=False, finetune_mode='full'):
+    """根据名称创建模型实例"""
+    if model_name == 'BasicCNN':
+        return BasicCNN()
+    elif model_name == 'ResNet18':
+        return ResNet18()
+    elif model_name == 'VGG_A':
+        return VGG_A()
+    elif model_name == 'VGG_A_BatchNorm':
+        return VGG_A_BatchNorm()
+    elif model_name == 'PreActResNet18':
+        return PreActResNet18()
+    elif model_name == 'PretrainedResNet18':
+        return get_pretrained_resnet18(pretrained=pretrained, finetune_mode=finetune_mode)
+    else:
+        raise ValueError(f"不支持的模型类型: {model_name}")
+
+# 创建模型实例
+net = get_model(args.model, pretrained=args.pretrained, finetune_mode=args.finetune_mode)
+print(f'使用模型: {args.model}')
+
 net = net.to(device)
-print(f'使用模型: PreActResNet18')
+print(f"使用模型: {args.model}")
 
 # 计算模型参数量
 param_count = count_parameters(net)
@@ -147,6 +187,41 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
 
+# 初始化wandb（如果指定）
+if args.use_wandb:
+    try:
+        # 确定run名称
+        run_name = args.wandb_run_name
+        if run_name is None:
+            run_name = args.model
+            run_name = f"{run_name}_{args.save_name}" if args.save_name != 'ckpt' else run_name
+        
+        # 初始化wandb
+        wandb.init(
+            project='cifar-pj',  # 固定项目名为cifar-pj
+            name=run_name,
+            config={
+                "model": args.model,
+                "learning_rate": args.lr,
+                "batch_size": args.batch_size,
+                "epochs": args.epochs,
+                "seed": args.seed,
+                "validation_split": args.validation_split,
+                "patience": args.patience,
+                "resume": args.resume,
+                "save_name": args.save_name,
+                "pretrained": args.pretrained,
+                "finetune_mode": args.finetune_mode if args.model == 'PretrainedResNet18' else None
+            }
+        )
+        print(f"成功初始化wandb，项目名称: cifar-pj, 运行名称: {run_name}")
+        
+        # 记录模型架构到wandb
+        wandb.watch(net)
+    except Exception as e:
+        print(f"初始化wandb时出错: {e}")
+        print("将继续训练但不使用wandb")
+        args.use_wandb = False
 
 # 训练
 def train(epoch, net, train_loader, criterion, optimizer, device):
@@ -179,6 +254,19 @@ def train(epoch, net, train_loader, criterion, optimizer, device):
     epoch_time = time.time() - epoch_start_time
     print(f'训练耗时: {epoch_time:.2f}s | 训练损失: {train_loss/(batch_idx+1):.4f} | 训练准确率: {train_acc:.2f}% | 学习率: {current_lr:.6f}')
     
+    # 记录wandb指标
+    if args.use_wandb:
+        try:
+            wandb.log({
+                "epoch": epoch,
+                "train_loss": train_loss/(batch_idx+1),
+                "train_accuracy": train_acc,
+                "learning_rate": current_lr,
+                "epoch_time": epoch_time
+            })
+        except Exception as e:
+            print(f"记录wandb指标时出错: {e}")
+    
     return train_loss/(batch_idx+1), train_acc
 
 # 验证
@@ -203,6 +291,18 @@ def validate(epoch, net, val_loader, criterion, device):
     
     val_acc = 100.*correct/total
     print(f'验证损失: {val_loss/(batch_idx+1):.4f} | 验证准确率: {val_acc:.2f}%')
+    
+    # 记录wandb指标
+    if args.use_wandb:
+        try:
+            wandb.log({
+                "epoch": epoch,
+                "val_loss": val_loss/(batch_idx+1),
+                "val_accuracy": val_acc
+            })
+        except Exception as e:
+            print(f"记录wandb验证指标时出错: {e}")
+    
     return val_loss/(batch_idx+1), val_acc
 
 # 测试
@@ -227,10 +327,21 @@ def test(model, test_loader, criterion, device):
 
     test_acc = 100.*correct/total
     print(f'测试损失: {test_loss/(batch_idx+1):.4f} | 测试准确率: {test_acc:.2f}%')
+    
+    # 记录最终测试指标到wandb
+    if args.use_wandb:
+        try:
+            wandb.log({
+                "test_loss": test_loss/(batch_idx+1),
+                "test_accuracy": test_acc
+            })
+        except Exception as e:
+            print(f"记录wandb测试指标时出错: {e}")
+    
     return test_loss/(batch_idx+1), test_acc
 
 def main():
-    print(f"\n{'='*50}\n训练 PreActResNet18\n{'='*50}")
+    print(f"\n{'='*50}\n训练 {args.model}\n{'='*50}")
     start_time = time.time()
 
     train_losses = []
@@ -319,6 +430,19 @@ def main():
 
     print(f'最佳测试准确率: {test_acc:.2f}%')
     print(f"模型保存在: ./checkpoint/{args.save_name}.pth")
+
+    # 关闭wandb
+    if args.use_wandb:
+        try:
+            # 记录最终的训练时间和参数量
+            param_count = count_parameters(net)
+            wandb.log({
+                "total_training_time": total_time,
+                "parameter_count_M": param_count
+            })
+            wandb.finish()
+        except Exception as e:
+            print(f"关闭wandb时出错: {e}")
 
 if __name__ == "__main__":
     # 在Windows上需要添加这一行以支持多进程
