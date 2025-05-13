@@ -5,6 +5,11 @@ import time
 import sys
 import os
 import random
+import wandb  # 导入wandb
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+import itertools
 
 # 添加项目根目录到系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -62,6 +67,12 @@ def parse_args():
     parser.add_argument('--download', action='store_true', default=True,
                         help='是否下载数据集')
     
+    # wandb参数
+    parser.add_argument('--use_wandb', action='store_true', default=False,
+                        help='是否使用wandb进行可视化')
+    parser.add_argument('--wandb_run_name', type=str, default=None,
+                        help='wandb运行的名称，默认使用模型名称')
+    
     # 其他参数
     parser.add_argument('--seed', type=int, default=42, 
                         help='随机种子')
@@ -103,6 +114,28 @@ def split_train_val_data(train_dataset, val_ratio=0.1, seed=42):
     
     return train_sampler, val_sampler
 
+def plot_confusion_matrix(cm, class_names, title='混淆矩阵'):
+    """绘制混淆矩阵"""
+    plt.figure(figsize=(10, 8))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(class_names))
+    plt.xticks(tick_marks, class_names, rotation=45)
+    plt.yticks(tick_marks, class_names)
+    
+    # 标注数值
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], 'd'),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+    
+    plt.tight_layout()
+    plt.ylabel('真实标签')
+    plt.xlabel('预测标签')
+    return plt
+
 def main():
     # 解析命令行参数
     args = parse_args()
@@ -115,6 +148,55 @@ def main():
     image_dir = os.path.join(args.output_dir, 'images')
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(image_dir, exist_ok=True)
+    
+    # 设置wandb环境变量
+    # 检测是否为Kaggle环境
+    is_kaggle = os.path.exists("/kaggle/input")
+    if is_kaggle:
+        os.environ["WANDB_CONSOLE"] = "off"  # 在Kaggle上禁用特殊的console输出
+        os.environ["WANDB_SILENT"] = "true"  # 减少一些非必要输出
+    
+    # 初始化wandb（如果指定）
+    use_wandb = args.use_wandb
+    if use_wandb:
+        try:
+            # 确定run名称
+            run_name = args.wandb_run_name
+            if run_name is None:
+                run_name = args.model_name if args.model_name else args.model
+                if args.exp_tag:
+                    run_name = f"{run_name}_{args.exp_tag}"
+            
+            # 检测是否为Kaggle环境
+            is_kaggle = os.path.exists("/kaggle/input")
+            if is_kaggle:
+                print("检测到Kaggle环境，确保您已添加wandb API密钥")
+            
+            # 初始化wandb
+            wandb.init(
+                project="PJ2",
+                name=run_name,
+                config={
+                    "model": args.model,
+                    "optimizer": args.optimizer,
+                    "lr": args.lr,
+                    "weight_decay": args.weight_decay,
+                    "momentum": args.momentum if args.optimizer.lower() == 'sgd' else None,
+                    "batch_size": args.batch_size,
+                    "epochs": args.epochs,
+                    "seed": args.seed,
+                    "validation_split": args.validation_split,
+                    "patience": args.patience,
+                    "resume": args.resume,
+                    "exp_tag": args.exp_tag,
+                    "is_kaggle": is_kaggle
+                }
+            )
+            print(f"成功初始化wandb，项目名称: PJ2, 运行名称: {run_name}")
+        except Exception as e:
+            print(f"初始化wandb时出错: {e}")
+            print("将继续训练但不使用wandb")
+            use_wandb = False
     
     # 设置设备
     device = torch.device("cuda" if args.cuda and torch.cuda.is_available() else "cpu")
@@ -181,6 +263,13 @@ def main():
     param_count = count_parameters(model)
     print(f"模型有 {param_count:.2f}M 参数")
     
+    # 记录模型架构到wandb
+    if use_wandb:
+        try:
+            wandb.watch(model)
+        except Exception as e:
+            print(f"wandb.watch模型时出错: {e}")
+    
     # 创建优化器（根据参数）
     if args.optimizer.lower() == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, 
@@ -233,11 +322,12 @@ def main():
     # 调用训练函数
     train_results = train(
         model, train_loader, criterion=nn.CrossEntropyLoss(), 
-        optimizer=optimizer, device=device, epochs=args.epochs,  # 不再减去start_epoch，直接使用args.epochs
+        optimizer=optimizer, device=device, epochs=args.epochs,
         validation_loader=val_loader,
         patience=args.patience,
         scheduler=scheduler,
-        best_val_loss=best_val_loss  # 传入已有的最佳验证损失
+        best_val_loss=best_val_loss,  # 传入已有的最佳验证损失
+        use_wandb=use_wandb  # 使用可能已更新的wandb标志
     )
     
     # 提取训练结果
@@ -298,6 +388,20 @@ def main():
     print(f"测试准确率: {test_acc:.2f}%")
     print(f"测试损失: {test_loss:.4f}")
     print(f"模型保存为: {model_name}.pth")
+    
+    # 记录最终测试结果到wandb
+    if use_wandb:
+        try:
+            wandb.log({
+                "test_accuracy": test_acc,
+                "test_loss": test_loss,
+                "training_time_seconds": training_time,
+                "parameter_count_M": param_count
+            })
+            wandb.finish()
+        except Exception as e:
+            print(f"记录最终wandb结果时出错: {e}")
+
 
 if __name__ == "__main__":
     main() 

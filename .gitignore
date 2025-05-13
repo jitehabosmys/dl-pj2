@@ -49,3 +49,5 @@ data/cifar-10-batches-py/
 # 参考文件
 # pytorch-cifar-master/
 
+# wandb
+wandb/
