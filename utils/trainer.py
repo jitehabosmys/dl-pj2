@@ -135,7 +135,6 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
                 # 调用保存检查点回调函数（如果提供）
                 if save_model_func is not None:
                     save_path = save_model_func(best_model_state, epoch, val_loss, val_acc)
-                    print(f"检查点已保存到 {save_path}")
                 
                 # 记录最佳验证指标
                 if use_wandb:

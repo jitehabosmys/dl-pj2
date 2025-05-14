@@ -295,7 +295,6 @@ def main():
             'val_loss': val_loss,
             'val_acc': val_acc
         }, save_path)
-        print(f"第{epoch+1}轮: 验证损失从 {best_val_loss:.4f} 改善到 {val_loss:.4f}，保存模型到 {save_path}")
         return save_path
     
     # 调用训练函数
