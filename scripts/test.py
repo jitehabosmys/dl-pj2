@@ -67,7 +67,7 @@ def get_model(model_name):
 
 # 修改后的模型加载函数
 def load_model(model, model_name, save_dir='results/models'):
-    """加载预训练模型，支持新旧两种格式"""
+    """加载预训练模型，支持新旧两种格式，并处理DataParallel的'module.'前缀"""
     try:
         model_path = os.path.join(save_dir, f"{model_name}.pth")
         if not os.path.exists(model_path):
@@ -75,20 +75,36 @@ def load_model(model, model_name, save_dir='results/models'):
             return False, None
         
         checkpoint = torch.load(model_path)
+        state_dict = None
         
         # 检查并适应不同的保存格式
         if 'model_state_dict' in checkpoint:
             # 新格式：使用model_state_dict键
-            model.load_state_dict(checkpoint['model_state_dict'])
-            print(f"使用新格式加载模型: {model_path}")
+            state_dict = checkpoint['model_state_dict']
+            print(f"从'model_state_dict'加载模型状态")
         elif 'net' in checkpoint:
             # 旧格式：使用net键
-            model.load_state_dict(checkpoint['net'])
-            print(f"使用旧格式加载模型: {model_path}")
+            state_dict = checkpoint['net']
+            print(f"从'net'键加载模型状态")
         else:
             # 直接尝试加载（可能是只有状态字典的情况）
-            model.load_state_dict(checkpoint)
-            print(f"直接加载模型状态字典: {model_path}")
+            state_dict = checkpoint
+            print(f"直接加载模型状态字典")
+        
+        # 处理DataParallel模型的前缀问题
+        if all(k.startswith('module.') for k in state_dict.keys()):
+            # 如果所有键都有'module.'前缀，则将其移除
+            print(f"检测到DataParallel模型的'module.'前缀，正在处理...")
+            from collections import OrderedDict
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k[7:]  # 移除'module.'前缀
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+        
+        # 加载处理后的状态字典
+        model.load_state_dict(state_dict)
+        print(f"成功加载模型: {model_path}")
         
         return True, checkpoint
     except Exception as e:
@@ -142,7 +158,7 @@ def main():
         # 适应不同的键名格式
         if 'epoch' in checkpoint:
             print(f"模型在第 {checkpoint['epoch']} 轮保存")
-        elif 'epoch' in checkpoint.get('epoch', None):
+        elif 'epoch' in checkpoint.get('epoch', {}):
             print(f"模型在第 {checkpoint['epoch']} 轮保存")
             
         # 检查并输出准确率信息
