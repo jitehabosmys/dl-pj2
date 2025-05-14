@@ -5,21 +5,17 @@ import time
 import sys
 import os
 import random
-import wandb  # 导入wandb
+import wandb
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
-import itertools
 import torch.backends.cudnn as cudnn
 
 # 添加项目根目录到系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.loaders import get_cifar_loader
-from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18, PretrainedResNet18, get_pretrained_resnet18
+from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18, get_pretrained_resnet18
 from utils.trainer import train, evaluate, set_seed
-from utils.visualization import visualize_results
-from utils.model_utils import count_parameters, save_model, get_optimizer, load_model
+from utils.model_utils import count_parameters
 
 def parse_args():
     parser = argparse.ArgumentParser(description='训练单个模型')
@@ -29,15 +25,9 @@ def parse_args():
                         choices=['BasicCNN', 'ResNet18', 'VGG_A', 'VGG_A_BatchNorm', 'PreActResNet18', 'PretrainedResNet18'],
                         help='要训练的模型类型')
     
-    # 加载预训练模型参数
-    parser.add_argument('--resume', type=str, default=None,
-                        help='指定要加载的预训练模型文件名（不包含.pth扩展名），用于继续训练')
-    parser.add_argument('--model_dir', type=str, default='results/models',
-                        help='模型加载和保存目录')
-    
     # 训练参数
     parser.add_argument('--epochs', type=int, default=300, 
-                        help='训练轮数（如果使用--resume，则表示额外训练的轮数）')
+                        help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='批量大小')
     parser.add_argument('--validation_split', type=float, default=0.1,
@@ -45,23 +35,9 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=30, 
                         help='早停耐心值，连续多少个epoch验证性能未提升则停止训练')
     
-    # 优化参数
-    parser.add_argument('--optimizer', type=str, default='sgd',
-                        choices=['adam', 'sgd', 'rmsprop', 'adamw'],
-                        help='优化器类型')
+    # 学习率参数
     parser.add_argument('--lr', type=float, default=0.1, 
                         help='学习率')
-    parser.add_argument('--weight_decay', type=float, default=5e-4,
-                        help='权重衰减系数（L2正则化）')
-    parser.add_argument('--momentum', type=float, default=0.9,
-                        help='SGD动量值(仅用于SGD优化器)')
-    
-    # 学习率调度器参数
-    parser.add_argument('--lr_scheduler', type=str, default='multistep',
-                      choices=['cosine', 'multistep', 'plateau'],
-                      help='学习率调度器类型')
-    parser.add_argument('--milestones', type=str, default='150,225,270',
-                      help='MultiStepLR的里程碑(epoch)，用逗号分隔')
     
     # 自定义命名参数
     parser.add_argument('--model_name', type=str, default=None,
@@ -145,34 +121,13 @@ def main():
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(image_dir, exist_ok=True)
     
-    # 设置wandb环境变量
-    # 检测是否为Kaggle环境
-    is_kaggle = os.path.exists("/kaggle/input")
-    if is_kaggle:
-        os.environ["WANDB_CONSOLE"] = "off"  # 在Kaggle上禁用特殊的console输出
-        os.environ["WANDB_SILENT"] = "true"  # 减少一些非必要输出
-    
     # 初始化wandb（如果指定）
     use_wandb = args.use_wandb
     if use_wandb:
         try:
             # 检测是否为Kaggle环境
             is_kaggle = os.path.exists("/kaggle/input")
-            anonymous = None
-            
-            if is_kaggle:
-                print("检测到Kaggle环境，尝试从secrets获取wandb API密钥")
-                try:
-                    from kaggle_secrets import UserSecretsClient
-                    user_secrets = UserSecretsClient()
-                    secret_value = user_secrets.get_secret("wandb_api")
-                    wandb.login(key=secret_value)
-                    print("成功从Kaggle secrets获取wandb API密钥")
-                except Exception as e:
-                    print(f"无法从Kaggle secrets获取wandb API密钥: {e}")
-                    print("如果要使用您的W&B账户，请前往Kaggle的Add-ons -> Secrets，提供您的W&B访问令牌。使用标签名称'wandb_api'。")
-                    print("从这里获取您的W&B访问令牌: https://wandb.ai/authorize")
-                    anonymous = "must"
+            anonymous = None if not is_kaggle else "must"
             
             # 确定run名称
             run_name = args.wandb_run_name
@@ -183,30 +138,27 @@ def main():
             
             # 初始化wandb
             wandb.init(
-                project="PJ2",
+                project="cifar-pj",
                 name=run_name,
                 config={
                     "model": args.model,
-                    "optimizer": args.optimizer,
+                    "optimizer": "sgd",  # 固定为SGD
                     "lr": args.lr,
-                    "weight_decay": args.weight_decay,
-                    "momentum": args.momentum if args.optimizer.lower() == 'sgd' else None,
+                    "weight_decay": 5e-4,  # 固定为5e-4
+                    "momentum": 0.9,  # 固定为0.9
                     "batch_size": args.batch_size,
                     "epochs": args.epochs,
                     "seed": args.seed,
                     "validation_split": args.validation_split,
                     "patience": args.patience,
-                    "resume": args.resume,
                     "exp_tag": args.exp_tag,
-                    "is_kaggle": is_kaggle,
                     "pretrained": args.pretrained,
                     "finetune_mode": args.finetune_mode,
-                    "lr_scheduler": args.lr_scheduler,
-                    "milestones": args.milestones if args.lr_scheduler == 'multistep' else None
+                    "lr_scheduler": "cosine"  # 固定为cosine
                 },
                 anonymous=anonymous
             )
-            print(f"成功初始化wandb，项目名称: PJ2, 运行名称: {run_name}")
+            print(f"成功初始化wandb，项目名称: cifar-pj, 运行名称: {run_name}")
         except Exception as e:
             print(f"初始化wandb时出错: {e}")
             print("将继续训练但不使用wandb")
@@ -290,70 +242,42 @@ def main():
         except Exception as e:
             print(f"wandb.watch模型时出错: {e}")
     
-    # 创建优化器（根据参数）
-    if args.optimizer.lower() == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, 
-                                   momentum=args.momentum, 
-                                   weight_decay=args.weight_decay)
-    else:
-        optimizer = get_optimizer(model, args.optimizer, args.lr, args.weight_decay)
+    # 创建优化器（固定为SGD）
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, 
+                               momentum=0.9, weight_decay=5e-4)
     
-    # 初始epoch和最佳准确率
-    start_epoch = 0
-    best_acc = 0
+    # 创建学习率调度器（固定为cosine）
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
+    
+    # 初始化最佳验证损失
     best_val_loss = float('inf')
-    
-    # 创建学习率调度器
-    if args.lr_scheduler == 'cosine':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-        print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
-    elif args.lr_scheduler == 'multistep':
-        milestones = [int(m) for m in args.milestones.split(',')]
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
-        print(f"使用MultiStepLR学习率调度器，里程碑={milestones}, gamma=0.1")
-    else:  # plateau
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 
-            mode='min',
-            factor=0.1,      # 保持0.1的降低比例
-            patience=15,     # 调整为15轮
-            threshold=0.005, # 添加阈值参数
-            cooldown=5,      # 添加冷却期
-            min_lr=1e-5      # 设置最小学习率
-)
-        print(f"使用ReduceLROnPlateau学习率调度器，factor=0.1, patience=15")
-    
-    # 如果指定了预训练模型，则加载
-    if args.resume:
-        print(f"尝试加载预训练模型: {args.resume}")
-        load_success, checkpoint = load_model(model, args.resume, optimizer, scheduler, save_dir=args.model_dir)
-        if load_success:
-            if checkpoint is not None:
-                if 'epoch' in checkpoint:
-                    start_epoch = checkpoint['epoch'] + 1  # 从下一个epoch开始
-                    print(f"继续从epoch {start_epoch}开始训练")
-                if 'acc' in checkpoint:
-                    best_acc = checkpoint['acc']
-                    print(f"加载的最佳准确率: {best_acc:.2f}%")
-                if 'best_val_loss' in checkpoint:
-                    best_val_loss = checkpoint['best_val_loss']
-                    print(f"加载的最佳验证损失: {best_val_loss:.4f}")
-                
-                # 在resume模式下，更新学习率调度器的T_max
-                if isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
-                    scheduler.T_max = start_epoch + args.epochs
-                    print(f"更新学习率调度器：T_max={scheduler.T_max}")
-            print(f"成功加载预训练模型，继续训练...")
-        else:
-            print(f"无法加载预训练模型，将从头开始训练...")
-    else:
-        # 非resume模式，设置学习率调度器的T_max
-        if isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
-            scheduler.T_max = args.epochs
     
     # 训练模型
     print(f"\n{'='*50}\n训练 {args.model}\n{'='*50}")
     start_time = time.time()
+    
+    # 定义保存模型的回调函数
+    def save_best_model(model_state, epoch, val_loss, val_acc):
+        # 生成自定义文件名
+        if args.model_name:
+            model_name = args.model_name
+        else:
+            model_name = args.model
+        
+        if args.exp_tag:
+            model_name = f"{model_name}_{args.exp_tag}"
+        
+        # 保存最佳模型
+        save_path = os.path.join(model_dir, f"{model_name}.pth")
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model_state,
+            'val_loss': val_loss,
+            'val_acc': val_acc
+        }, save_path)
+        print(f"第{epoch+1}轮: 验证损失从 {best_val_loss:.4f} 改善到 {val_loss:.4f}，保存模型到 {save_path}")
+        return save_path
     
     # 调用训练函数
     train_results = train(
@@ -362,8 +286,9 @@ def main():
         validation_loader=val_loader,
         patience=args.patience,
         scheduler=scheduler,
-        best_val_loss=best_val_loss,  # 传入已有的最佳验证损失
-        use_wandb=use_wandb  # 使用可能已更新的wandb标志
+        best_val_loss=best_val_loss,
+        use_wandb=use_wandb,
+        save_model_func=save_best_model if val_loader is not None else None
     )
     
     # 提取训练结果
@@ -375,6 +300,18 @@ def main():
         train_losses, train_accs, best_model_state = train_results
         # 使用最佳模型状态
         model.load_state_dict(best_model_state)
+        # 如果没有验证集，则保存最后的模型
+        model_name = args.model_name if args.model_name else args.model
+        if args.exp_tag:
+            model_name = f"{model_name}_{args.exp_tag}"
+        save_path = os.path.join(model_dir, f"{model_name}.pth")
+        torch.save({
+            'epoch': args.epochs - 1,
+            'model_state_dict': best_model_state,
+            'train_loss': train_losses[-1] if train_losses else 0,
+            'train_acc': train_accs[-1] if train_accs else 0
+        }, save_path)
+        print(f"无验证集训练完成，保存模型到 {save_path}")
     
     training_time = time.time() - start_time
     print(f"训练时间: {training_time:.2f} 秒")
@@ -382,48 +319,20 @@ def main():
     # 测试模型
     test_loss, test_acc = evaluate(model, test_loader, nn.CrossEntropyLoss(), device)
     
-    # 生成自定义文件名
-    if args.model_name:
-        model_name = args.model_name
-    else:
-        model_name = args.model
-    
-    if args.exp_tag:
-        model_name = f"{model_name}_{args.exp_tag}"
-        result_prefix = f"{args.model}_{args.exp_tag}"
-    else:
-        result_prefix = args.model_name if args.model_name else args.model
-    
-    # 可视化训练结果
-    visualize_results(train_losses, train_accs, result_prefix, save_dir=image_dir)
-    
-    # 计算当前训练完的总epoch数
-    current_epoch = start_epoch + len(train_losses) - 1
-    
-    # 获取最终的最佳验证损失
-    final_best_val_loss = best_val_loss
-    if val_loader is not None and len(val_losses) > 0:
-        min_val_loss_idx = val_losses.index(min(val_losses))
-        final_best_val_loss = val_losses[min_val_loss_idx]
-    
-    # 保存模型
-    save_model(model, model_name, optimizer, scheduler, current_epoch, test_acc, final_best_val_loss, save_dir=model_dir)
-    
     # 打印结果摘要
     print("\n结果摘要:")
     print(f"模型: {args.model}")
-    if args.resume:
-        print(f"从预训练模型继续: {args.resume}")
     if args.exp_tag:
         print(f"实验标签: {args.exp_tag}")
-    print(f"优化器: {args.optimizer}, 学习率: {args.lr}, 权重衰减: {args.weight_decay}")
+    print(f"优化器: SGD, 学习率: {args.lr}, 权重衰减: 5e-4, 动量: 0.9")
+    print(f"学习率调度器: CosineAnnealing")
     print(f"参数量: {param_count:.2f}M")
     print(f"训练时间: {training_time:.2f}s")
     if val_loader is not None:
         print(f"最佳验证准确率: {max(val_accs):.2f}%")
     print(f"测试准确率: {test_acc:.2f}%")
     print(f"测试损失: {test_loss:.4f}")
-    print(f"模型保存为: {model_name}.pth")
+    print(f"模型已保存为: {model_name}.pth")
     
     # 记录最终测试结果到wandb
     if use_wandb:
