@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.loaders import get_cifar_loader
 from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18
 from utils.trainer import evaluate, set_seed
-from utils.model_utils import load_model, count_parameters
+from utils.model_utils import count_parameters
 
 def parse_args():
     parser = argparse.ArgumentParser(description='测试预训练模型')
@@ -65,6 +65,36 @@ def get_model(model_name):
     else:
         raise ValueError(f"不支持的模型类型: {model_name}")
 
+# 修改后的模型加载函数
+def load_model(model, model_name, save_dir='results/models'):
+    """加载预训练模型，支持新旧两种格式"""
+    try:
+        model_path = os.path.join(save_dir, f"{model_name}.pth")
+        if not os.path.exists(model_path):
+            print(f"模型文件 {model_path} 不存在")
+            return False, None
+        
+        checkpoint = torch.load(model_path)
+        
+        # 检查并适应不同的保存格式
+        if 'model_state_dict' in checkpoint:
+            # 新格式：使用model_state_dict键
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"使用新格式加载模型: {model_path}")
+        elif 'net' in checkpoint:
+            # 旧格式：使用net键
+            model.load_state_dict(checkpoint['net'])
+            print(f"使用旧格式加载模型: {model_path}")
+        else:
+            # 直接尝试加载（可能是只有状态字典的情况）
+            model.load_state_dict(checkpoint)
+            print(f"直接加载模型状态字典: {model_path}")
+        
+        return True, checkpoint
+    except Exception as e:
+        print(f"加载模型时出错: {e}")
+        return False, None
+
 def main():
     # 解析命令行参数
     args = parse_args()
@@ -101,7 +131,7 @@ def main():
     # 创建模型实例
     model = get_model(args.model)
     
-    # 加载预训练权重
+    # 加载预训练权重（使用修改后的函数）
     load_success, checkpoint = load_model(model, model_name, save_dir=args.model_dir)
     if not load_success:
         print(f"无法加载模型，请先训练模型或检查模型文件路径。")
@@ -109,12 +139,17 @@ def main():
     
     # 提取和打印额外信息（如果有）
     if checkpoint is not None and args.verbose:
-        epoch = checkpoint.get('epoch', None)
-        acc = checkpoint.get('acc', None)
-        if epoch is not None:
-            print(f"模型在第 {epoch} 轮保存")
-        if acc is not None:
-            print(f"保存时的准确率: {acc:.2f}%")
+        # 适应不同的键名格式
+        if 'epoch' in checkpoint:
+            print(f"模型在第 {checkpoint['epoch']} 轮保存")
+        elif 'epoch' in checkpoint.get('epoch', None):
+            print(f"模型在第 {checkpoint['epoch']} 轮保存")
+            
+        # 检查并输出准确率信息
+        if 'acc' in checkpoint:
+            print(f"保存时的准确率: {checkpoint['acc']:.2f}%")
+        elif 'val_acc' in checkpoint:
+            print(f"保存时的验证准确率: {checkpoint['val_acc']:.2f}%")
     
     # 将模型移至设备并设置为评估模式
     model = model.to(device)

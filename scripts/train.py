@@ -121,6 +121,15 @@ def main():
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(image_dir, exist_ok=True)
     
+    # 生成模型名称（提前定义，确保全局访问）
+    if args.model_name:
+        model_name = args.model_name
+    else:
+        model_name = args.model
+    
+    if args.exp_tag:
+        model_name = f"{model_name}_{args.exp_tag}"
+    
     # 初始化wandb（如果指定）
     use_wandb = args.use_wandb
     if use_wandb:
@@ -150,9 +159,7 @@ def main():
             # 确定run名称
             run_name = args.wandb_run_name
             if run_name is None:
-                run_name = args.model_name if args.model_name else args.model
-                if args.exp_tag:
-                    run_name = f"{run_name}_{args.exp_tag}"
+                run_name = model_name
             
             # 初始化wandb
             wandb.init(
@@ -278,15 +285,6 @@ def main():
     
     # 定义保存模型的回调函数
     def save_best_model(model_state, epoch, val_loss, val_acc):
-        # 生成自定义文件名
-        if args.model_name:
-            model_name = args.model_name
-        else:
-            model_name = args.model
-        
-        if args.exp_tag:
-            model_name = f"{model_name}_{args.exp_tag}"
-        
         # 保存最佳模型
         save_path = os.path.join(model_dir, f"{model_name}.pth")
         torch.save({
@@ -295,6 +293,7 @@ def main():
             'val_loss': val_loss,
             'val_acc': val_acc
         }, save_path)
+        print(f"第{epoch+1}轮: 验证损失从 {best_val_loss:.4f} 改善到 {val_loss:.4f}，保存模型到 {save_path}")
         return save_path
     
     # 调用训练函数
@@ -319,9 +318,6 @@ def main():
         # 使用最佳模型状态
         model.load_state_dict(best_model_state)
         # 如果没有验证集，则保存最后的模型
-        model_name = args.model_name if args.model_name else args.model
-        if args.exp_tag:
-            model_name = f"{model_name}_{args.exp_tag}"
         save_path = os.path.join(model_dir, f"{model_name}.pth")
         torch.save({
             'epoch': args.epochs - 1,
