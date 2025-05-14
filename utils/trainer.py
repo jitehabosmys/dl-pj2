@@ -1,15 +1,7 @@
 import torch
-# from utils import progress_bar  # 导入progress_bar替代tqdm
+from tqdm import tqdm  # 导入tqdm
 import numpy as np
 import wandb  # 导入wandb
-
-# 定义进度条函数
-def progress_bar(current, total, msg=None):
-    """简单的进度条实现"""
-    if msg:
-        print(f'[{current}/{total}] {msg}', end='\r')
-    else:
-        print(f'[{current}/{total}]', end='\r')
 
 # 设置随机种子以保证结果可复现
 def set_seed(seed=42):
@@ -62,29 +54,33 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
         print('\nEpoch: %d' % epoch)
         model.train()
         
-        for batch_idx, (inputs, labels) in enumerate(train_loader):
-            inputs, labels = inputs.to(device), labels.to(device)
-            
-            # 梯度清零
-            optimizer.zero_grad()
-            
-            # 前向传播
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            
-            # 反向传播和优化
-            loss.backward()
-            optimizer.step()
-            
-            # 统计
-            running_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-            
-            # 使用progress_bar显示进度
-            progress_bar(batch_idx, len(train_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (running_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        # 使用tqdm创建进度条
+        pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{epochs}')
+        for batch_idx, (inputs, labels) in enumerate(pbar):
+                inputs, labels = inputs.to(device), labels.to(device)
+                
+                # 梯度清零
+                optimizer.zero_grad()
+                
+                # 前向传播
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                
+                # 反向传播和优化
+                loss.backward()
+                optimizer.step()
+                
+                # 统计
+                running_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+                
+                # 更新tqdm进度条
+                pbar.set_postfix({
+                    'Loss': '%.3f' % (running_loss/(batch_idx+1)),
+                    'Acc': '%.3f%%' % (100.*correct/total)
+                })
         
         # 计算每个epoch的平均损失和准确率
         epoch_loss = running_loss / len(train_loader)
@@ -202,19 +198,23 @@ def evaluate(model, test_loader, criterion, device, desc='Evaluating'):
     total = 0
     
     with torch.no_grad():
-        for batch_idx, (inputs, labels) in enumerate(test_loader):
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            
-            test_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-            
-            # 使用progress_bar显示进度
-            progress_bar(batch_idx, len(test_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        # 使用tqdm创建进度条
+        pbar = tqdm(test_loader, desc=desc)
+        for batch_idx, (inputs, labels) in enumerate(pbar):
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                
+                test_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+                
+                # 更新tqdm进度条
+                pbar.set_postfix({
+                    'Loss': '%.3f' % (test_loss/(batch_idx+1)),
+                    'Acc': '%.3f%%' % (100.*correct/total)
+                })
     
     avg_loss = test_loss / len(test_loader)
     accuracy = 100. * correct / total

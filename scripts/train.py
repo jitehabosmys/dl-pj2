@@ -131,27 +131,6 @@ def split_train_val_data(train_dataset, val_ratio=0.1, seed=42):
     
     return train_sampler, val_sampler
 
-def plot_confusion_matrix(cm, class_names, title='混淆矩阵'):
-    """绘制混淆矩阵"""
-    plt.figure(figsize=(10, 8))
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(class_names))
-    plt.xticks(tick_marks, class_names, rotation=45)
-    plt.yticks(tick_marks, class_names)
-    
-    # 标注数值
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], 'd'),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-    
-    plt.tight_layout()
-    plt.ylabel('真实标签')
-    plt.xlabel('预测标签')
-    return plt
 
 def main():
     # 解析命令行参数
