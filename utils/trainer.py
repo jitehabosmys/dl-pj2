@@ -1,7 +1,15 @@
 import torch
-from tqdm import tqdm
+# from utils import progress_bar  # 导入progress_bar替代tqdm
 import numpy as np
 import wandb  # 导入wandb
+
+# 定义进度条函数
+def progress_bar(current, total, msg=None):
+    """简单的进度条实现"""
+    if msg:
+        print(f'[{current}/{total}] {msg}', end='\r')
+    else:
+        print(f'[{current}/{total}]', end='\r')
 
 # 设置随机种子以保证结果可复现
 def set_seed(seed=42):
@@ -12,17 +20,7 @@ def set_seed(seed=42):
     # torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-def get_gradient_norm(model):
-    """计算模型参数的梯度范数"""
-    total_norm = 0.0
-    for p in model.parameters():
-        if p.grad is not None:
-            param_norm = p.grad.data.norm(2)
-            total_norm += param_norm.item() ** 2
-    total_norm = total_norm ** (1. / 2)
-    return total_norm
-
-def train(model, train_loader, criterion, optimizer, device, epochs=10, scheduler=None, validation_loader=None, patience=5, best_val_loss=float('inf'), use_wandb=False):
+def train(model, train_loader, criterion, optimizer, device, epochs=10, scheduler=None, validation_loader=None, patience=5, best_val_loss=float('inf'), use_wandb=False, save_model_func=None):
     """训练模型
     
     参数:
@@ -37,6 +35,7 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
         patience: 早停耐心值，连续多少个epoch验证性能未提升则停止训练
         best_val_loss: 初始最佳验证损失（用于恢复训练）
         use_wandb: 是否使用wandb记录训练过程
+        save_model_func: 用于保存检查点的回调函数（可选）
     
     返回:
         train_losses: 每个epoch的训练损失列表
@@ -55,57 +54,47 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
     best_model_state = model.state_dict().copy()
     early_stopping_counter = 0
     
-    # 记录梯度范数
-    grad_norms = []
-    
     for epoch in range(epochs):
         running_loss = 0.0
         correct = 0
         total = 0
-        batch_grad_norms = []
         
-        # 使用tqdm显示进度条
-        with tqdm(train_loader, desc=f'Epoch {epoch+1}/{epochs}') as pbar:
-            for inputs, labels in pbar:
-                inputs, labels = inputs.to(device), labels.to(device)
-                
-                # 梯度清零
-                optimizer.zero_grad()
-                
-                # 前向传播
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                
-                # 反向传播和优化
-                loss.backward()
-                
-                # 计算并记录梯度范数
-                grad_norm = get_gradient_norm(model)
-                batch_grad_norms.append(grad_norm)
-                
-                optimizer.step()
-                
-                # 统计
-                running_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += labels.size(0)
-                correct += predicted.eq(labels).sum().item()
-                
-                # 更新进度条
-                pbar.set_postfix({
-                    'loss': f'{running_loss/len(pbar):.4f}',
-                    'acc': f'{100.*correct/total:.2f}%',
-                })
+        print('\nEpoch: %d' % epoch)
+        model.train()
         
-        # 计算每个epoch的平均梯度范数
-        epoch_grad_norm = sum(batch_grad_norms) / len(batch_grad_norms)
-        grad_norms.append(epoch_grad_norm)
+        for batch_idx, (inputs, labels) in enumerate(train_loader):
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            # 梯度清零
+            optimizer.zero_grad()
+            
+            # 前向传播
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            # 反向传播和优化
+            loss.backward()
+            optimizer.step()
+            
+            # 统计
+            running_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+            
+            # 使用progress_bar显示进度
+            progress_bar(batch_idx, len(train_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (running_loss/(batch_idx+1), 100.*correct/total, correct, total))
         
         # 计算每个epoch的平均损失和准确率
         epoch_loss = running_loss / len(train_loader)
         epoch_acc = 100. * correct / total
         train_losses.append(epoch_loss)
         train_accs.append(epoch_acc)
+        
+        # 获取当前学习率
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f'训练损失: {epoch_loss:.4f} | 训练准确率: {epoch_acc:.2f}% | 学习率: {current_lr:.6f}')
         
         # wandb记录当前epoch的训练指标
         if use_wandb:
@@ -114,8 +103,7 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
                     "epoch": epoch + 1,
                     "train_loss": epoch_loss,
                     "train_accuracy": epoch_acc,
-                    "learning_rate": optimizer.param_groups[0]['lr'],
-                    "gradient_norm": epoch_grad_norm
+                    "learning_rate": current_lr
                 }
             except Exception as e:
                 print(f"准备wandb训练指标时出错: {e}")
@@ -138,7 +126,6 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
                     print(f"添加wandb验证指标时出错: {e}")
             
             # 打印当前学习率和验证结果
-            current_lr = optimizer.param_groups[0]['lr']
             print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Acc: {epoch_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%, LR: {current_lr:.6f}')
             
             # 早停逻辑
@@ -148,6 +135,11 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
                 best_val_loss = val_loss
                 best_model_state = model.state_dict().copy()
                 early_stopping_counter = 0
+                
+                # 调用保存检查点回调函数（如果提供）
+                if save_model_func is not None:
+                    save_path = save_model_func(best_model_state, epoch, val_loss, val_acc)
+                    print(f"检查点已保存到 {save_path}")
                 
                 # 记录最佳验证指标
                 if use_wandb:
@@ -175,7 +167,6 @@ def train(model, train_loader, criterion, optimizer, device, epochs=10, schedule
                     break
         else:
             # 打印当前学习率
-            current_lr = optimizer.param_groups[0]['lr']
             print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%, LR: {current_lr:.6f}')
         
         
@@ -211,21 +202,19 @@ def evaluate(model, test_loader, criterion, device, desc='Evaluating'):
     total = 0
     
     with torch.no_grad():
-        with tqdm(test_loader, desc=desc) as pbar:
-            for inputs, labels in pbar:
-                inputs, labels = inputs.to(device), labels.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                
-                test_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += labels.size(0)
-                correct += predicted.eq(labels).sum().item()
-                
-                pbar.set_postfix({
-                    'loss': f'{test_loss/len(pbar):.4f}',
-                    'acc': f'{100.*correct/total:.2f}%'
-                })
+        for batch_idx, (inputs, labels) in enumerate(test_loader):
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            test_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+            
+            # 使用progress_bar显示进度
+            progress_bar(batch_idx, len(test_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
     
     avg_loss = test_loss / len(test_loader)
     accuracy = 100. * correct / total
