@@ -1,5 +1,5 @@
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('Agg')  # 非交互式后端，适合保存图像
 import matplotlib.pyplot as plt
 from torch import nn
 import numpy as np
@@ -8,59 +8,48 @@ import os
 import random
 from tqdm import tqdm as tqdm
 from IPython import display
+import torchvision
+import torchvision.transforms as transforms
+import time
 
 from models.vgg import VGG_A
 from models.vgg import VGG_A_BatchNorm # you need to implement this network
-from data.loaders import get_cifar_loader
 
 # ## Constants (parameters) initialization
 device_id = [0,1,2,3]
 num_workers = 4
 batch_size = 128
 
-# add our package dir to path 
-module_path = os.path.dirname(os.getcwd())
-home_path = module_path
-figures_path = os.path.join(home_path, 'reports', 'figures')
-models_path = os.path.join(home_path, 'reports', 'models')
+# 修改为更符合当前项目结构的路径
+figures_path = 'results/images'
+models_path = 'results/models'
+loss_save_path = 'results'
+grad_save_path = 'results'
+
+# 确保目录存在
+os.makedirs(figures_path, exist_ok=True)
+os.makedirs(models_path, exist_ok=True)
+os.makedirs(loss_save_path, exist_ok=True)
+os.makedirs(grad_save_path, exist_ok=True)
 
 # Make sure you are using the right device.
-device_id = device_id
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-device = torch.device("cuda:{}".format(3) if torch.cuda.is_available() else "cpu")
-print(device)
-print(torch.cuda.get_device_name(3))
-
-
-
-# Initialize your data loader and
-# make sure that dataloader works
-# as expected by observing one
-# sample from it.
-train_loader = get_cifar_loader(train=True)
-val_loader = get_cifar_loader(train=False)
-for X,y in train_loader:
-    ## --------------------
-    # Add code as needed
-    #
-    #
-    #
-    #
-    ## --------------------
-    break
-
-
+device = torch.device("cuda:{}".format(0) if torch.cuda.is_available() else "cpu")
 
 # This function is used to calculate the accuracy of model classification
-def get_accuracy():
-    ## --------------------
-    # Add code as needed
-    #
-    #
-    #
-    #
-    ## --------------------
-    pass
+def get_accuracy(model, data_loader, device):
+    """计算模型在给定数据集上的准确率"""
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, targets in data_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+    return 100.0 * correct / total
 
 # Set a random seed to ensure reproducible results
 def set_random_seeds(seed_value=0, device='cpu'):
@@ -72,7 +61,6 @@ def set_random_seeds(seed_value=0, device='cpu'):
         torch.cuda.manual_seed_all(seed_value)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
 
 # We use this function to complete the entire
 # training process. In order to plot the loss landscape,
@@ -89,16 +77,17 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
     max_val_accuracy_epoch = 0
 
     batches_n = len(train_loader)
-    losses_list = []
-    grads = []
+    losses_list = []  # 所有步骤的损失列表
+    grads = []      # 所有步骤的梯度列表
+    
     for epoch in tqdm(range(epochs_n), unit='epoch'):
         if scheduler is not None:
             scheduler.step()
         model.train()
 
-        loss_list = []  # use this to record the loss value of each step
-        grad = []  # use this to record the loss gradient of each step
-        learning_curve[epoch] = 0  # maintain this to plot the training curve
+        loss_list = []  # 当前epoch的损失列表
+        grad = []       # 当前epoch的梯度列表
+        learning_curve[epoch] = 0  # 当前epoch的平均损失
 
         for data in train_loader:
             x, y = data
@@ -107,79 +96,218 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
             optimizer.zero_grad()
             prediction = model(x)
             loss = criterion(prediction, y)
-            # You may need to record some variable values here
-            # if you want to get loss gradient, use
-            # grad = model.classifier[4].weight.grad.clone()
-            ## --------------------
-            # Add your code
-            #
-            #
-            #
-            #
-            ## --------------------
-
-
+            
+            # 记录损失值
+            loss_list.append(loss.item())
+            learning_curve[epoch] += loss.item()
+            
+            # 反向传播前记录损失
             loss.backward()
+            
+            # 获取梯度信息 (对于分类器层的梯度)
+            if hasattr(model, 'classifier') and len(model.classifier) > 4:
+                # 记录分类器中第5个层(索引4)的梯度
+                if model.classifier[4].weight.grad is not None:
+                    current_grad = model.classifier[4].weight.grad.norm().item()
+                    grad.append(current_grad)
+            
             optimizer.step()
 
         losses_list.append(loss_list)
         grads.append(grad)
-        display.clear_output(wait=True)
-        f, axes = plt.subplots(1, 2, figsize=(15, 3))
-
+        
+        # 计算当前epoch的平均损失
         learning_curve[epoch] /= batches_n
-        axes[0].plot(learning_curve)
+        
+        # 计算当前训练和验证准确率
+        train_accuracy = get_accuracy(model, train_loader, device)
+        train_accuracy_curve[epoch] = train_accuracy
+        
+        if val_loader is not None:
+            val_accuracy = get_accuracy(model, val_loader, device)
+            val_accuracy_curve[epoch] = val_accuracy
+            
+            if val_accuracy > max_val_accuracy:
+                max_val_accuracy = val_accuracy
+                max_val_accuracy_epoch = epoch
+                
+            print(f"Epoch {epoch+1}/{epochs_n}, Loss: {learning_curve[epoch]:.4f}, Train Acc: {train_accuracy:.2f}%, Val Acc: {val_accuracy:.2f}%, Best Val Acc: {max_val_accuracy:.2f}% at epoch {max_val_accuracy_epoch+1}")
+        else:
+            print(f"Epoch {epoch+1}/{epochs_n}, Loss: {learning_curve[epoch]:.4f}, Train Acc: {train_accuracy:.2f}%")
 
-        # Test your model and save figure here (not required)
-        # remember to use model.eval()
-        ## --------------------
-        # Add code as needed
-        #
-        #
-        #
-        #
-        ## --------------------
+        # 不再生成每个epoch的可视化，只保留打印信息
 
-    return
+    return losses_list, grads
 
+# 绘制损失景观函数
+def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=None):
+    """绘制损失景观"""
+    plt.figure(figsize=(10, 6))
+    steps = range(len(min_curve))
+    
+    # 绘制最小和最大损失曲线
+    plt.plot(steps, min_curve, 'b-', label='Min Loss')
+    plt.plot(steps, max_curve, 'r-', label='Max Loss')
+    
+    # 填充两条曲线之间的区域
+    plt.fill_between(steps, min_curve, max_curve, alpha=0.2)
+    
+    plt.title(f'Loss Landscape: {title}')
+    plt.xlabel('Training Steps')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    if save_path:
+        plt.savefig(save_path)
+        print(f"已保存图像到: {save_path}")
+    plt.close()  # 关闭图形而不是显示
 
-# Train your model
-# feel free to modify
-epo = 20
-loss_save_path = ''
-grad_save_path = ''
+# 计算min_curve和max_curve
+def compute_loss_curves(losses_lists):
+    """计算多个模型的最小和最大损失曲线"""
+    # 首先找到最短的损失列表长度
+    min_lengths = [len(model_losses) for model_losses in losses_lists]
+    if not min_lengths:
+        return [], []
+        
+    min_length = min(min_lengths)
+    
+    min_curve = []
+    max_curve = []
+    
+    # 对每个步骤，找出所有模型中的最小和最大损失
+    for step in range(min_length):
+        step_losses = []
+        for model_loss in losses_lists:
+            if step < len(model_loss):
+                step_losses.append(model_loss[step])
+        
+        if step_losses:
+            min_curve.append(min(step_losses))
+            max_curve.append(max(step_losses))
+    
+    return min_curve, max_curve
 
-set_random_seeds(seed_value=2020, device=device)
-model = VGG_A()
-lr = 0.001
-optimizer = torch.optim.Adam(model.parameters(), lr = lr)
-criterion = nn.CrossEntropyLoss()
-loss, grads = train(model, optimizer, criterion, train_loader, val_loader, epochs_n=epo)
-np.savetxt(os.path.join(loss_save_path, 'loss.txt'), loss, fmt='%s', delimiter=' ')
-np.savetxt(os.path.join(grad_save_path, 'grads.txt'), grads, fmt='%s', delimiter=' ')
+def main():
+    """主函数：执行模型训练和损失景观分析"""
+    # 显示开始消息
+    print(f"{'='*50}")
+    print(f"开始训练和损失景观分析")
+    print(f"{'='*50}")
+    print(f"使用设备: {device}")
+    if torch.cuda.is_available():
+        print(f"GPU型号: {torch.cuda.get_device_name(device.index)}")
+    
+    # 初始化数据加载器
+    print("准备数据...")
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ])
 
-# Maintain two lists: max_curve and min_curve,
-# select the maximum value of loss in all models
-# on the same step, add it to max_curve, and
-# the minimum value to min_curve
-min_curve = []
-max_curve = []
-## --------------------
-# Add your code
-#
-#
-#
-#
-## --------------------
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ])
 
-# Use this function to plot the final loss landscape,
-# fill the area between the two curves can use plt.fill_between()
-def plot_loss_landscape():
-    ## --------------------
-    # Add your code
-    #
-    #
-    #
-    #
-    ## --------------------
-    pass
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+    train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
+    test_loader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=num_workers)
+
+    # Display one batch of samples to ensure data loading works
+    for X, y in train_loader:
+        # Display sample batch information
+        print(f"X shape: {X.shape}, y shape: {y.shape}")
+        print(f"X min: {X.min():.4f}, X max: {X.max():.4f}")
+        print(f"Label sample: {y[:10]}")
+        break
+    
+    # 训练参数 - 减少epoch数量加快训练速度
+    epo = 10
+    
+    # 设置学习率 - 减少为只使用两种学习率以加快训练速度
+    learning_rates = [1e-3, 5e-4]  # 仅使用两种学习率进行测试
+    losses_lists_vgg = []
+    losses_lists_vgg_bn = []
+
+    # 对每个学习率训练VGG模型
+    for lr in learning_rates:
+        print(f"\n{'='*50}\n训练普通VGG模型 (学习率: {lr})\n{'='*50}")
+        set_random_seeds(seed_value=2020, device=device)
+        model = VGG_A()
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        criterion = nn.CrossEntropyLoss()
+        model_losses, model_grads = train(model, optimizer, criterion, train_loader, test_loader, epochs_n=epo)
+        losses_lists_vgg.append(model_losses)
+        
+        # 保存该模型的损失和梯度
+        np.savetxt(os.path.join(loss_save_path, f'loss_vgg_lr_{lr}.txt'), model_losses, fmt='%s', delimiter=' ')
+        np.savetxt(os.path.join(grad_save_path, f'grads_vgg_lr_{lr}.txt'), model_grads, fmt='%s', delimiter=' ')
+
+    # 对每个学习率训练VGG_BN模型
+    for lr in learning_rates:
+        print(f"\n{'='*50}\n训练带BN的VGG模型 (学习率: {lr})\n{'='*50}")
+        set_random_seeds(seed_value=2020, device=device)
+        model_bn = VGG_A_BatchNorm()
+        optimizer_bn = torch.optim.Adam(model_bn.parameters(), lr=lr)
+        criterion_bn = nn.CrossEntropyLoss()
+        model_losses_bn, model_grads_bn = train(model_bn, optimizer_bn, criterion_bn, train_loader, test_loader, epochs_n=epo)
+        losses_lists_vgg_bn.append(model_losses_bn)
+        
+        # 保存该模型的损失和梯度
+        np.savetxt(os.path.join(loss_save_path, f'loss_vgg_bn_lr_{lr}.txt'), model_losses_bn, fmt='%s', delimiter=' ')
+        np.savetxt(os.path.join(grad_save_path, f'grads_vgg_bn_lr_{lr}.txt'), model_grads_bn, fmt='%s', delimiter=' ')
+
+    # 计算VGG模型的min_curve和max_curve
+    min_curve_vgg, max_curve_vgg = compute_loss_curves(losses_lists_vgg)
+    # 计算VGG_BN模型的min_curve和max_curve
+    min_curve_vgg_bn, max_curve_vgg_bn = compute_loss_curves(losses_lists_vgg_bn)
+
+    print(f"{'='*50}")
+    print(f"训练完成，开始绘制损失景观...")
+    print(f"{'='*50}")
+    
+    # 绘制VGG模型的损失景观
+    plot_loss_landscape(min_curve_vgg, max_curve_vgg, title="VGG-A", 
+                        save_path=os.path.join(figures_path, "vgg_loss_landscape.png"))
+
+    # 绘制VGG_BN模型的损失景观
+    plot_loss_landscape(min_curve_vgg_bn, max_curve_vgg_bn, title="VGG-A with BatchNorm", 
+                        save_path=os.path.join(figures_path, "vgg_bn_loss_landscape.png"))
+
+    # 绘制对比图 - 在同一图中展示两种模型的loss landscape
+    plt.figure(figsize=(12, 7))
+    steps_vgg = range(len(min_curve_vgg))
+    steps_vgg_bn = range(len(min_curve_vgg_bn))
+
+    plt.plot(steps_vgg, min_curve_vgg, 'b-', alpha=0.5, label='VGG-A Min')
+    plt.plot(steps_vgg, max_curve_vgg, 'b-', alpha=0.5)
+    plt.fill_between(steps_vgg, min_curve_vgg, max_curve_vgg, alpha=0.2, color='blue', label='VGG-A Range')
+
+    plt.plot(steps_vgg_bn, min_curve_vgg_bn, 'r-', alpha=0.5, label='VGG-A BatchNorm Min')
+    plt.plot(steps_vgg_bn, max_curve_vgg_bn, 'r-', alpha=0.5)
+    plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, alpha=0.2, color='red', label='VGG-A BatchNorm Range')
+
+    plt.title('Loss Landscape Comparison: VGG-A vs VGG-A with BatchNorm')
+    plt.xlabel('Training Steps')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    comparison_path = os.path.join(figures_path, "loss_landscape_comparison.png")
+    plt.savefig(comparison_path)
+    print(f"已保存对比图到: {comparison_path}")
+    plt.close()
+
+    print(f"{'='*50}")
+    print("训练和可视化完成，损失景观图已保存。")
+    print(f"可视化文件保存在: {figures_path}")
+    print(f"{'='*50}")
+
+# 只有当直接运行此脚本时才执行主函数
+if __name__ == "__main__":
+    main()
