@@ -145,6 +145,17 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
     plt.figure(figsize=(10, 6))
     steps = range(len(min_curve))
     
+    # 打印用于调试的信息
+    print(f"绘制 {title} 损失景观:")
+    print(f"  min_curve类型: {type(min_curve)}, 长度: {len(min_curve)}")
+    print(f"  min_curve值: {min_curve}")
+    print(f"  max_curve类型: {type(max_curve)}, 长度: {len(max_curve)}")
+    print(f"  max_curve值: {max_curve}")
+    
+    # 确保min_curve和max_curve是一维数组
+    min_curve = np.array(min_curve).flatten()
+    max_curve = np.array(max_curve).flatten()
+    
     # 绘制最小和最大损失曲线
     plt.plot(steps, min_curve, 'b-', label='Min Loss')
     plt.plot(steps, max_curve, 'r-', label='Max Loss')
@@ -153,7 +164,7 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
     plt.fill_between(steps, min_curve, max_curve, alpha=0.2)
     
     plt.title(f'Loss Landscape: {title}')
-    plt.xlabel('Training Steps')
+    plt.xlabel('Training Steps (Batches)')
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True)
@@ -166,22 +177,33 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
 # 计算min_curve和max_curve
 def compute_loss_curves(losses_lists):
     """计算多个模型的最小和最大损失曲线"""
-    # 首先找到最短的损失列表长度
-    min_lengths = [len(model_losses) for model_losses in losses_lists]
-    if not min_lengths:
+    # losses_lists是一个三维列表: [模型][epoch][batch]
+    # 需要将所有batch的损失展平为一个大列表
+    
+    if not losses_lists:
         return [], []
-        
-    min_length = min(min_lengths)
+    
+    # 将每个模型的所有batch损失值展平到一个列表中
+    flattened_losses = []
+    for model_losses in losses_lists:
+        # 展平每个模型的所有epoch的所有batch损失
+        model_flat_losses = []
+        for epoch_losses in model_losses:
+            model_flat_losses.extend(epoch_losses)
+        flattened_losses.append(model_flat_losses)
+    
+    # 找到最短的展平后损失列表长度
+    min_length = min([len(flat_losses) for flat_losses in flattened_losses]) if flattened_losses else 0
     
     min_curve = []
     max_curve = []
     
-    # 对每个步骤，找出所有模型中的最小和最大损失
+    # 对每个batch步骤，找出所有模型中的最小和最大损失
     for step in range(min_length):
         step_losses = []
-        for model_loss in losses_lists:
-            if step < len(model_loss):
-                step_losses.append(model_loss[step])
+        for model_losses in flattened_losses:
+            if step < len(model_losses):
+                step_losses.append(model_losses[step])
         
         if step_losses:
             min_curve.append(min(step_losses))
@@ -245,8 +267,12 @@ def main():
         model_losses, model_grads = train(model, optimizer, criterion, train_loader, test_loader, epochs_n=epo)
         losses_lists_vgg.append(model_losses)
         
-        # 保存该模型的损失和梯度
-        np.savetxt(os.path.join(loss_save_path, f'loss_vgg_lr_{lr}.txt'), model_losses, fmt='%s', delimiter=' ')
+        # 保存该模型的所有batch损失
+        # 将所有epoch的batch损失展平为一个列表
+        flat_losses = []
+        for epoch_losses in model_losses:
+            flat_losses.extend(epoch_losses)
+        np.savetxt(os.path.join(loss_save_path, f'loss_vgg_lr_{lr}.txt'), flat_losses, fmt='%.6f')
         np.savetxt(os.path.join(grad_save_path, f'grads_vgg_lr_{lr}.txt'), model_grads, fmt='%s', delimiter=' ')
 
     # 对每个学习率训练VGG_BN模型
@@ -259,14 +285,34 @@ def main():
         model_losses_bn, model_grads_bn = train(model_bn, optimizer_bn, criterion_bn, train_loader, test_loader, epochs_n=epo)
         losses_lists_vgg_bn.append(model_losses_bn)
         
-        # 保存该模型的损失和梯度
-        np.savetxt(os.path.join(loss_save_path, f'loss_vgg_bn_lr_{lr}.txt'), model_losses_bn, fmt='%s', delimiter=' ')
+        # 保存该模型的所有batch损失
+        # 将所有epoch的batch损失展平为一个列表
+        flat_losses_bn = []
+        for epoch_losses in model_losses_bn:
+            flat_losses_bn.extend(epoch_losses)
+        np.savetxt(os.path.join(loss_save_path, f'loss_vgg_bn_lr_{lr}.txt'), flat_losses_bn, fmt='%.6f')
         np.savetxt(os.path.join(grad_save_path, f'grads_vgg_bn_lr_{lr}.txt'), model_grads_bn, fmt='%s', delimiter=' ')
 
     # 计算VGG模型的min_curve和max_curve
+    # 调试信息，帮助理解数据结构
+    print(f"VGG模型数量: {len(losses_lists_vgg)}")
+    
+    # 计算每个模型的总batch数
+    if losses_lists_vgg:
+        total_batches = 0
+        for epoch_losses in losses_lists_vgg[0]:
+            total_batches += len(epoch_losses)
+        print(f"VGG第一个模型的总batch数: {total_batches}")
+    
+    # 计算VGG模型的min_curve和max_curve
     min_curve_vgg, max_curve_vgg = compute_loss_curves(losses_lists_vgg)
+    
     # 计算VGG_BN模型的min_curve和max_curve
     min_curve_vgg_bn, max_curve_vgg_bn = compute_loss_curves(losses_lists_vgg_bn)
+    
+    # 打印曲线长度，确认数据正确
+    print(f"VGG min_curve长度: {len(min_curve_vgg)}")
+    print(f"VGG_BN min_curve长度: {len(min_curve_vgg_bn)}")
 
     print(f"{'='*50}")
     print(f"训练完成，开始绘制损失景观...")
@@ -282,6 +328,20 @@ def main():
 
     # 绘制对比图 - 在同一图中展示两种模型的loss landscape
     plt.figure(figsize=(12, 7))
+    
+    # 确保数据为numpy一维数组
+    min_curve_vgg = np.array(min_curve_vgg).flatten()
+    max_curve_vgg = np.array(max_curve_vgg).flatten()
+    min_curve_vgg_bn = np.array(min_curve_vgg_bn).flatten()
+    max_curve_vgg_bn = np.array(max_curve_vgg_bn).flatten()
+    
+    # 打印比较图的数据信息
+    print("绘制损失景观比较图:")
+    print(f"  VGG min曲线长度: {len(min_curve_vgg)}")
+    print(f"  VGG max曲线长度: {len(max_curve_vgg)}")
+    print(f"  VGG_BN min曲线长度: {len(min_curve_vgg_bn)}")
+    print(f"  VGG_BN max曲线长度: {len(max_curve_vgg_bn)}")
+    
     steps_vgg = range(len(min_curve_vgg))
     steps_vgg_bn = range(len(min_curve_vgg_bn))
 
@@ -294,7 +354,7 @@ def main():
     plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, alpha=0.2, color='red', label='VGG-A BatchNorm Range')
 
     plt.title('Loss Landscape Comparison: VGG-A vs VGG-A with BatchNorm')
-    plt.xlabel('Training Steps')
+    plt.xlabel('Training Steps (Batches)')
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True)
