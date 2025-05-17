@@ -47,6 +47,8 @@ def parse_args():
     parser.add_argument('--learning_rates', type=str, 
                         default='1e-3,2e-3,1e-4,5e-4',
                         help='学习率列表，用逗号分隔 (默认: 1e-3,2e-3,1e-4,5e-4)')
+    parser.add_argument('--seed', type=int, default=2020,
+                        help='随机种子 (默认: 2020)')
     args = parser.parse_args()
     
     # 将逗号分隔的字符串转换为浮点数列表
@@ -312,7 +314,7 @@ def main():
     # 对每个学习率训练VGG模型
     for lr in learning_rates:
         print(f"\n{'='*50}\n训练普通VGG模型 (学习率: {lr})\n{'='*50}")
-        set_random_seeds(seed_value=2020, device=device)
+        set_random_seeds(seed_value=args.seed, device=device)
         model = VGG_A()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         criterion = nn.CrossEntropyLoss()
@@ -330,7 +332,7 @@ def main():
     # 对每个学习率训练VGG_BN模型
     for lr in learning_rates:
         print(f"\n{'='*50}\n训练带BN的VGG模型 (学习率: {lr})\n{'='*50}")
-        set_random_seeds(seed_value=2020, device=device)
+        set_random_seeds(seed_value=args.seed, device=device)
         model_bn = VGG_A_BatchNorm()
         optimizer_bn = torch.optim.Adam(model_bn.parameters(), lr=lr)
         criterion_bn = nn.CrossEntropyLoss()
