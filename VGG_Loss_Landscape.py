@@ -168,8 +168,8 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
         max_curve = np.array(max_curve).flatten()    
         
         # 截断
-        min_curve = min_curve[10:]
-        max_curve = max_curve[10:]
+        min_curve = min_curve[25:]
+        max_curve = max_curve[25:]
 
         # 准备绘图数据
         print(f"绘制损失景观: {title}")
