@@ -1,17 +1,22 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import argparse
 import torch
 import torch.nn as nn
 import time
 import sys
 import os
+
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import random
 import wandb
 import numpy as np
 import matplotlib.pyplot as plt
 import torch.backends.cudnn as cudnn
-
-# 添加项目根目录到系统路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.visualization import visualize_results, visualize_conv_filters
 
 from models import BasicCNN, ResNet18, VGG_A, VGG_A_BatchNorm, PreActResNet18, get_pretrained_resnet18
 from utils.trainer import train, evaluate, set_seed
@@ -359,6 +364,15 @@ def main():
             wandb.finish()
         except Exception as e:
             print(f"记录最终wandb结果时出错: {e}")
+    
+    # 可视化模型的卷积核
+    print("\n开始可视化卷积核...")
+    try:
+        # 确保使用最佳模型状态进行可视化
+        visualize_conv_filters(model, save_dir=image_dir, model_name=model_name)
+        print(f"卷积核可视化已保存到 {image_dir} 目录")
+    except Exception as e:
+        print(f"卷积核可视化过程中出错: {e}")
 
 
 if __name__ == "__main__":

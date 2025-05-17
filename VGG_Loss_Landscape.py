@@ -1,6 +1,8 @@
 import matplotlib as mpl
 mpl.use('Agg')  # 非交互式后端，适合保存图像
 import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_style("whitegrid")  # 使用seaborn的网格风格
 from torch import nn
 import numpy as np
 import torch
@@ -140,7 +142,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
     return losses_list, grads
 
 # 绘制损失景观函数
-def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=None):
+def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=None, color='#8FBC8F'):
     """绘制损失景观"""
     try:
         # 确保min_curve和max_curve是一维numpy数组
@@ -155,27 +157,22 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
         print(f"  max_curve前5个值: {max_curve[:5]}")
         
         # 创建图形
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 8))
         steps = range(len(min_curve))
         
-        # 绘制最小和最大损失曲线
-        plt.plot(steps, min_curve, 'b-', label='Min Loss')
-        plt.plot(steps, max_curve, 'r-', label='Max Loss')
-        
         # 填充两条曲线之间的区域
-        plt.fill_between(steps, min_curve, max_curve, alpha=0.2)
+        plt.fill_between(steps, min_curve, max_curve, alpha=0.35, color=color)
     except Exception as e:
         print(f"绘制损失景观时出错: {e}")
-    
+
     try:
-        plt.title(f'Loss Landscape: {title}')
-        plt.xlabel('Training Steps (Batches)')
-        plt.ylabel('Loss')
-        plt.legend()
-        plt.grid(True)
+        plt.title(f'Loss Landscape: {title}', fontsize=18, pad=20)
+        plt.xlabel('Steps', fontsize=14)
+        plt.ylabel('Loss Landscape', fontsize=14)
+        plt.grid(True, alpha=0.3, color='gray')
         
         if save_path:
-            plt.savefig(save_path)
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"已保存图像到: {save_path}")
         plt.close()  # 关闭图形而不是显示
     except Exception as e:
@@ -280,7 +277,7 @@ def main():
         break
     
     # 训练参数 - 减少epoch数量加快训练速度
-    epo = 5
+    epo = 2
     
     # 设置学习率 - 减少为只使用两种学习率以加快训练速度
     learning_rates = [1e-3, 5e-4]  # 仅使用两种学习率进行测试
@@ -354,11 +351,13 @@ def main():
     
     # 绘制VGG模型的损失景观
     plot_loss_landscape(min_curve_vgg, max_curve_vgg, title="VGG-A", 
-                        save_path=os.path.join(figures_path, "vgg_loss_landscape.png"))
+                        save_path=os.path.join(figures_path, "vgg_loss_landscape.png"),
+                        color='#8FBC8F')  # 浅绿色
 
     # 绘制VGG_BN模型的损失景观
     plot_loss_landscape(min_curve_vgg_bn, max_curve_vgg_bn, title="VGG-A with BatchNorm", 
-                        save_path=os.path.join(figures_path, "vgg_bn_loss_landscape.png"))
+                        save_path=os.path.join(figures_path, "vgg_bn_loss_landscape.png"),
+                        color='#DB7093')  # 浅粉色
 
     print("准备绘制对比图...")
     
@@ -379,7 +378,7 @@ def main():
         
         # 检查数组长度，确保至少有数据可以绘图
         if len(min_curve_vgg) > 0 and len(max_curve_vgg) > 0 and len(min_curve_vgg_bn) > 0 and len(max_curve_vgg_bn) > 0:
-            plt.figure(figsize=(12, 7))
+            plt.figure(figsize=(12, 8))
             
             # 打印前几个值帮助调试
             print(f"  VGG min前5个值: {min_curve_vgg[:5]}")
@@ -390,27 +389,23 @@ def main():
             steps_vgg = range(len(min_curve_vgg))
             steps_vgg_bn = range(len(min_curve_vgg_bn))
 
-            print("开始绘制曲线...")
-            plt.plot(steps_vgg, min_curve_vgg, 'b-', alpha=0.5, label='VGG-A Min')
-            plt.plot(steps_vgg, max_curve_vgg, 'b-', alpha=0.5)
-            print("绘制VGG填充区域...")
-            plt.fill_between(steps_vgg, min_curve_vgg, max_curve_vgg, alpha=0.2, color='blue', label='VGG-A Range')
-
-            plt.plot(steps_vgg_bn, min_curve_vgg_bn, 'r-', alpha=0.5, label='VGG-A BatchNorm Min')
-            plt.plot(steps_vgg_bn, max_curve_vgg_bn, 'r-', alpha=0.5)
-            print("绘制VGG_BN填充区域...")
-            plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, alpha=0.2, color='red', label='VGG-A BatchNorm Range')
+            print("绘制填充区域...")
+            # 使用更美观的颜色填充区域
+            plt.fill_between(steps_vgg, min_curve_vgg, max_curve_vgg, 
+                             alpha=0.35, color='#8FBC8F', label='Standard VGG')
+            plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, 
+                             alpha=0.35, color='#DB7093', label='Standard VGG + BatchNorm')
             
             print("设置图表标题、轴标签等...")
-            plt.title('Loss Landscape Comparison: VGG-A vs VGG-A with BatchNorm')
-            plt.xlabel('Training Steps (Batches)')
-            plt.ylabel('Loss')
-            plt.legend()
-            plt.grid(True)
+            plt.title('Loss Landscape', fontsize=18, pad=20)
+            plt.xlabel('Steps', fontsize=14)
+            plt.ylabel('Loss Landscape', fontsize=14)
+            plt.legend(loc='upper right', fontsize=12)
+            plt.grid(True, alpha=0.3, color='gray')
             
             print("保存对比图...")
             comparison_path = os.path.join(figures_path, "loss_landscape_comparison.png")
-            plt.savefig(comparison_path)
+            plt.savefig(comparison_path, dpi=300, bbox_inches='tight')
             print(f"已保存对比图到: {comparison_path}")
             plt.close()
         else:
