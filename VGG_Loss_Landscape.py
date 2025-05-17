@@ -124,14 +124,12 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
             
             # 记录整个网络的梯度信息
             total_grad_norm = 0.0
-            param_count = 0
             for name, param in model.named_parameters():
                 if param.grad is not None:
-                    total_grad_norm += param.grad.norm().item()
-                    param_count += 1
-            if param_count > 0:
-                avg_grad_norm = total_grad_norm / param_count
-                grad.append(avg_grad_norm)
+                    total_grad_norm += param.grad.norm().item() ** 2  # 平方和
+            # 计算总范数(而非平均值)
+            total_grad_norm = np.sqrt(total_grad_norm)  # 平方和的平方根
+            grad.append(total_grad_norm)
             
             optimizer.step()
 
@@ -182,7 +180,7 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
     try:
         plt.title(f'Loss Landscape: {title}', fontsize=18, pad=20)
         plt.xlabel('Steps', fontsize=14)
-        plt.ylabel('Loss Landscape', fontsize=14)
+        plt.ylabel('Loss Value', fontsize=14)
         plt.grid(True, alpha=0.3, color='gray')
         
         if save_path:
@@ -258,26 +256,7 @@ def process_gradients(grads_list):
     
     return all_grads
 
-def plot_gradient_norms(grad_list, title, save_path):
-    """绘制梯度范数随时间变化图"""
-    plt.figure(figsize=(10, 6))
-    # 绘制原始梯度范数
-    plt.plot(grad_list, linewidth=1, alpha=0.7, label='原始梯度')
-    
-    # 绘制平滑后的梯度范数趋势（使用移动平均）
-    if len(grad_list) > 20:
-        window_size = min(20, len(grad_list) // 5)
-        smoothed = np.convolve(grad_list, np.ones(window_size)/window_size, mode='valid')
-        plt.plot(range(window_size-1, window_size-1+len(smoothed)),
-                smoothed, linewidth=2, color='red', label='移动平均')
-    
-    plt.title(f'梯度范数变化: {title}')
-    plt.xlabel('训练步骤')
-    plt.ylabel('梯度范数')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig(save_path)
-    plt.close()
+# 不需要单独的梯度范数可视化函数，因为我们只展示对比图
 
 def main():
     """主函数：执行模型训练和损失景观分析"""
@@ -372,37 +351,39 @@ def main():
     # 计算VGG_BN模型的min_curve和max_curve
     min_curve_vgg_bn, max_curve_vgg_bn = compute_loss_curves(losses_lists_vgg_bn)
     
-    # 绘制梯度范数变化图
-    print("绘制梯度范数变化图...")
+    # 绘制梯度范数对比图
+    print("Drawing gradient norm comparison plots...")
     for i, lr in enumerate(learning_rates):
         # 处理VGG的梯度数据
         vgg_grads = process_gradients(grads_lists_vgg[i])
-        plot_gradient_norms(
-            vgg_grads,
-            f'VGG (lr={lr})',
-            os.path.join(figures_path, f'vgg_gradient_norms_lr_{lr}.png')
-        )
         
         # 处理VGG_BN的梯度数据
         vgg_bn_grads = process_gradients(grads_lists_vgg_bn[i])
-        plot_gradient_norms(
-            vgg_bn_grads,
-            f'VGG+BN (lr={lr})',
-            os.path.join(figures_path, f'vgg_bn_gradient_norms_lr_{lr}.png')
-        )
         
         # 绘制对比图
         plt.figure(figsize=(12, 6))
+        
         # 如果梯度数据太多，进行降采样以提高可读性
         sample_rate = max(1, len(vgg_grads) // 500)  # 最多显示500个点
-        plt.plot(vgg_grads[::sample_rate], label='VGG', color='#8FBC8F', alpha=0.7)
-        plt.plot(vgg_bn_grads[::sample_rate], label='VGG+BN', color='#DB7093', alpha=0.7)
-        plt.title(f'梯度范数对比 (lr={lr})')
-        plt.xlabel('训练步骤')
-        plt.ylabel('梯度范数')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(figures_path, f'gradient_norms_comparison_lr_{lr}.png'))
+        
+        # 绘制梯度对比曲线
+        plt.plot(vgg_grads[::sample_rate], label='VGG', color='#8FBC8F', alpha=0.8, linewidth=1.5)
+        plt.plot(vgg_bn_grads[::sample_rate], label='VGG+BN', color='#DB7093', alpha=0.8, linewidth=1.5)
+        
+        # 添加图表标题和标签（使用英文）
+        plt.title(f'Gradient Norm Comparison (lr={lr})', fontsize=16)
+        plt.xlabel('Training Steps', fontsize=14)
+        plt.ylabel('Gradient Norm', fontsize=14)
+        
+        # 设置对数刻度使梯度变化更明显
+        plt.yscale('log')
+        
+        # 添加图例和网格
+        plt.legend(fontsize=12)
+        plt.grid(True, alpha=0.3, which='both')  # both major and minor grid lines
+        
+        # 保存图像
+        plt.savefig(os.path.join(figures_path, f'gradient_norms_comparison_lr_{lr}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     print(f"{'='*50}")
