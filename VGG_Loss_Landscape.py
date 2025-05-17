@@ -49,6 +49,8 @@ def parse_args():
                         help='学习率列表，用逗号分隔 (默认: 1e-3,2e-3,1e-4,5e-4)')
     parser.add_argument('--seed', type=int, default=2020,
                         help='随机种子 (默认: 2020)')
+    parser.add_argument('--skip_steps', type=int, default=25,
+                        help='绘制损失景观时要跳过的初始步骤数 (默认: 25)')
     args = parser.parse_args()
     
     # 将逗号分隔的字符串转换为浮点数列表
@@ -159,42 +161,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
 
     return losses_list, grads
 
-# 绘制损失景观函数
-def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=None, color='#8FBC8F'):
-    """绘制损失景观"""
-    try:
-        # 确保min_curve和max_curve是一维numpy数组
-        min_curve = np.array(min_curve).flatten()
-        max_curve = np.array(max_curve).flatten()    
-        
-        # 截断
-        min_curve = min_curve[25:]
-        max_curve = max_curve[25:]
-
-        # 准备绘图数据
-        print(f"绘制损失景观: {title}")
-        
-        # 创建图形
-        plt.figure(figsize=(12, 8))
-        steps = range(len(min_curve))
-        
-        # 填充两条曲线之间的区域
-        plt.fill_between(steps, min_curve, max_curve, alpha=0.35, color=color)
-    except Exception as e:
-        print(f"绘制损失景观时出错: {e}")
-
-    try:
-        plt.title(f'Loss Landscape: {title}', fontsize=18, pad=20)
-        plt.xlabel('Steps', fontsize=14)
-        plt.ylabel('Loss Value', fontsize=14)
-        plt.grid(True, alpha=0.3, color='gray')
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"已保存图像到: {save_path}")
-        plt.close()  # 关闭图形而不是显示
-    except Exception as e:
-        print(f"完成绘图时出错: {e}")
+# 这个函数不再需要，我们将直接在主函数中绘制对比图
 
 # 计算min_curve和max_curve
 def compute_loss_curves(losses_lists):
@@ -270,6 +237,7 @@ def main():
     args = parse_args()
     epochs = args.epochs
     learning_rates = args.learning_rates
+    skip_steps = args.skip_steps
     
     # 显示开始消息
     print(f"{'='*50}")
@@ -393,64 +361,45 @@ def main():
         plt.close()
 
     print(f"{'='*50}")
-    print(f"训练完成，开始绘制损失景观...")
+    print(f"训练完成，开始绘制损失景观对比图...")
     print(f"{'='*50}")
     
-    # 绘制VGG模型的损失景观
-    plot_loss_landscape(min_curve_vgg, max_curve_vgg, title="VGG-A", 
-                        save_path=os.path.join(figures_path, "vgg_loss_landscape.png"),
-                        color='#8FBC8F')  # 浅绿色
-
-    # 绘制VGG_BN模型的损失景观
-    plot_loss_landscape(min_curve_vgg_bn, max_curve_vgg_bn, title="VGG-A with BatchNorm", 
-                        save_path=os.path.join(figures_path, "vgg_bn_loss_landscape.png"),
-                        color='#DB7093')  # 浅粉色
-
     print("准备绘制对比图...")
     
     try:
-        # 打印比较图的数据信息
-        print("绘制损失景观比较图开始:")
-        print(f"  VGG min曲线类型: {type(min_curve_vgg)}")
-        print(f"  VGG min曲线长度: {len(min_curve_vgg) if isinstance(min_curve_vgg, (list, np.ndarray)) else 'N/A'}")
-        print(f"  VGG max曲线长度: {len(max_curve_vgg) if isinstance(max_curve_vgg, (list, np.ndarray)) else 'N/A'}")
-        print(f"  VGG_BN min曲线长度: {len(min_curve_vgg_bn) if isinstance(min_curve_vgg_bn, (list, np.ndarray)) else 'N/A'}")
-        print(f"  VGG_BN max曲线长度: {len(max_curve_vgg_bn) if isinstance(max_curve_vgg_bn, (list, np.ndarray)) else 'N/A'}")
-        
         # 确保数据为numpy一维数组
         min_curve_vgg = np.array(min_curve_vgg, dtype=float).flatten()
         max_curve_vgg = np.array(max_curve_vgg, dtype=float).flatten()
         min_curve_vgg_bn = np.array(min_curve_vgg_bn, dtype=float).flatten()
         max_curve_vgg_bn = np.array(max_curve_vgg_bn, dtype=float).flatten()
         
+        # 截断前skip_steps个点
+        min_curve_vgg = min_curve_vgg[skip_steps:]
+        max_curve_vgg = max_curve_vgg[skip_steps:]
+        min_curve_vgg_bn = min_curve_vgg_bn[skip_steps:]
+        max_curve_vgg_bn = max_curve_vgg_bn[skip_steps:]
+        
+        print(f"已跳过前 {skip_steps} 个训练步骤，损失景观包含 {len(min_curve_vgg)} 个点")
+        
         # 检查数组长度，确保至少有数据可以绘图
         if len(min_curve_vgg) > 0 and len(max_curve_vgg) > 0 and len(min_curve_vgg_bn) > 0 and len(max_curve_vgg_bn) > 0:
             plt.figure(figsize=(12, 8))
             
-            # 打印前几个值帮助调试
-            print(f"  VGG min前5个值: {min_curve_vgg[:5]}")
-            print(f"  VGG max前5个值: {max_curve_vgg[:5]}")
-            print(f"  VGG_BN min前5个值: {min_curve_vgg_bn[:5]}")
-            print(f"  VGG_BN max前5个值: {max_curve_vgg_bn[:5]}")
-            
             steps_vgg = range(len(min_curve_vgg))
             steps_vgg_bn = range(len(min_curve_vgg_bn))
-
-            print("绘制填充区域...")
+            
             # 使用更美观的颜色填充区域
             plt.fill_between(steps_vgg, min_curve_vgg, max_curve_vgg, 
-                             alpha=0.35, color='#8FBC8F', label='Standard VGG')
+                            alpha=0.35, color='#8FBC8F', label='Standard VGG')
             plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, 
-                             alpha=0.35, color='#DB7093', label='Standard VGG + BatchNorm')
+                            alpha=0.35, color='#DB7093', label='Standard VGG + BatchNorm')
             
-            print("设置图表标题、轴标签等...")
             plt.title('Loss Landscape', fontsize=18, pad=20)
             plt.xlabel('Steps', fontsize=14)
-            plt.ylabel('Loss Landscape', fontsize=14)
+            plt.ylabel('Loss Value', fontsize=14)
             plt.legend(loc='upper right', fontsize=12)
             plt.grid(True, alpha=0.3, color='gray')
             
-            print("保存对比图...")
             comparison_path = os.path.join(figures_path, "loss_landscape_comparison.png")
             plt.savefig(comparison_path, dpi=300, bbox_inches='tight')
             print(f"已保存对比图到: {comparison_path}")
@@ -459,7 +408,6 @@ def main():
             print("错误: 曲线数据为空，无法生成对比图")
     except Exception as e:
         print(f"生成损失景观对比图时出错: {e}")
-        # 打印错误的详细信息
         import traceback
         print(traceback.format_exc())
 
