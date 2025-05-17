@@ -13,6 +13,7 @@ from IPython import display
 import torchvision
 import torchvision.transforms as transforms
 import time
+import argparse  # 添加argparse模块
 
 from models.vgg import VGG_A
 from models.vgg import VGG_A_BatchNorm # you need to implement this network
@@ -37,6 +38,21 @@ os.makedirs(grad_save_path, exist_ok=True)
 # Make sure you are using the right device.
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 device = torch.device("cuda:{}".format(0) if torch.cuda.is_available() else "cpu")
+
+# 添加参数解析函数
+def parse_args():
+    parser = argparse.ArgumentParser(description='VGG Loss Landscape Analysis')
+    parser.add_argument('--epochs', type=int, default=20,
+                        help='训练轮数 (默认: 20)')
+    parser.add_argument('--learning_rates', type=str, 
+                        default='1e-3,2e-3,1e-4,5e-4',
+                        help='学习率列表，用逗号分隔 (默认: 1e-3,2e-3,1e-4,5e-4)')
+    args = parser.parse_args()
+    
+    # 将逗号分隔的字符串转换为浮点数列表
+    args.learning_rates = [float(lr) for lr in args.learning_rates.split(',')]
+    
+    return args
 
 # This function is used to calculate the accuracy of model classification
 def get_accuracy(model, data_loader, device):
@@ -137,8 +153,6 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
         else:
             print(f"Epoch {epoch+1}/{epochs_n}, Loss: {learning_curve[epoch]:.4f}, Train Acc: {train_accuracy:.2f}%")
 
-        # 不再生成每个epoch的可视化，只保留打印信息
-
     return losses_list, grads
 
 # 绘制损失景观函数
@@ -238,13 +252,65 @@ def compute_loss_curves(losses_lists):
         # 返回空列表，避免程序崩溃
         return [], []
 
+def compute_gradient_predictiveness(grads_list, window_size=20):
+    """
+    计算梯度可预测性
+    grads_list: 每个epoch的梯度列表 [[epoch1_grads], [epoch2_grads], ...]
+    window_size: 滑动窗口大小，设置为20以匹配自相关性的lag数量
+    """
+    # 将所有epoch的梯度展平为一个列表
+    all_grads = []
+    for epoch_grads in grads_list:
+        all_grads.extend(epoch_grads)
+    
+    # 使用滑动窗口计算梯度变化
+    num_windows = len(all_grads) // window_size
+    predictiveness = []
+    
+    for i in range(num_windows):
+        start_idx = i * window_size
+        end_idx = start_idx + window_size
+        window_grads = all_grads[start_idx:end_idx]
+        
+        # 计算窗口内的梯度变化
+        grad_changes = np.diff(window_grads)
+        
+        # 计算窗口内的自相关性
+        autocorr = np.correlate(grad_changes, grad_changes, mode='full')[:window_size]
+        # 归一化自相关性
+        autocorr = autocorr / autocorr[0]
+        predictiveness.append(autocorr)
+    
+    # 计算所有窗口的平均预测性
+    mean_predictiveness = np.mean(predictiveness, axis=0)
+    
+    return mean_predictiveness
+
+def plot_gradient_predictiveness(predictiveness, title, save_path):
+    """绘制梯度可预测性"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(predictiveness)
+    plt.title(f'Gradient Predictiveness: {title}')
+    plt.xlabel('Lag')
+    plt.ylabel('Normalized Autocorrelation')
+    plt.grid(True)
+    plt.savefig(save_path)
+    plt.close()
+
 def main():
     """主函数：执行模型训练和损失景观分析"""
+    # 解析命令行参数
+    args = parse_args()
+    epochs = args.epochs
+    learning_rates = args.learning_rates
+    
     # 显示开始消息
     print(f"{'='*50}")
     print(f"开始训练和损失景观分析")
     print(f"{'='*50}")
     print(f"使用设备: {device}")
+    print(f"训练轮数: {epochs}")
+    print(f"学习率列表: {learning_rates}")
     if torch.cuda.is_available():
         print(f"GPU型号: {torch.cuda.get_device_name(device.index)}")
     
@@ -276,13 +342,11 @@ def main():
         print(f"Label sample: {y[:10]}")
         break
     
-    # 训练参数 - 减少epoch数量加快训练速度
-    epo = 2
-    
-    # 设置学习率 - 减少为只使用两种学习率以加快训练速度
-    learning_rates = [1e-3, 5e-4]  # 仅使用两种学习率进行测试
+    # 使用命令行参数中的epochs和学习率
     losses_lists_vgg = []
     losses_lists_vgg_bn = []
+    grads_lists_vgg = []
+    grads_lists_vgg_bn = []
 
     # 对每个学习率训练VGG模型
     for lr in learning_rates:
@@ -291,8 +355,9 @@ def main():
         model = VGG_A()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         criterion = nn.CrossEntropyLoss()
-        model_losses, model_grads = train(model, optimizer, criterion, train_loader, test_loader, epochs_n=epo)
+        model_losses, model_grads = train(model, optimizer, criterion, train_loader, test_loader, epochs_n=epochs)
         losses_lists_vgg.append(model_losses)
+        grads_lists_vgg.append(model_grads)
         
         # 保存该模型的所有batch损失
         # 将所有epoch的batch损失展平为一个列表
@@ -311,8 +376,9 @@ def main():
         model_bn = VGG_A_BatchNorm()
         optimizer_bn = torch.optim.Adam(model_bn.parameters(), lr=lr)
         criterion_bn = nn.CrossEntropyLoss()
-        model_losses_bn, model_grads_bn = train(model_bn, optimizer_bn, criterion_bn, train_loader, test_loader, epochs_n=epo)
+        model_losses_bn, model_grads_bn = train(model_bn, optimizer_bn, criterion_bn, train_loader, test_loader, epochs_n=epochs)
         losses_lists_vgg_bn.append(model_losses_bn)
+        grads_lists_vgg_bn.append(model_grads_bn)
         
         # 保存该模型的所有batch损失
         # 将所有epoch的batch损失展平为一个列表
@@ -341,10 +407,37 @@ def main():
     # 计算VGG_BN模型的min_curve和max_curve
     min_curve_vgg_bn, max_curve_vgg_bn = compute_loss_curves(losses_lists_vgg_bn)
     
-    # 打印曲线长度，确认数据正确
-    print(f"VGG min_curve长度: {len(min_curve_vgg)}")
-    print(f"VGG_BN min_curve长度: {len(min_curve_vgg_bn)}")
-
+    # 计算梯度可预测性
+    print("计算梯度可预测性...")
+    for i, lr in enumerate(learning_rates):
+        # 计算VGG的梯度可预测性
+        grad_predictiveness_vgg = compute_gradient_predictiveness(grads_lists_vgg[i])
+        plot_gradient_predictiveness(
+            grad_predictiveness_vgg,
+            f'VGG (lr={lr})',
+            os.path.join(figures_path, f'vgg_gradient_predictiveness_lr_{lr}.png')
+        )
+        
+        # 计算VGG_BN的梯度可预测性
+        grad_predictiveness_vgg_bn = compute_gradient_predictiveness(grads_lists_vgg_bn[i])
+        plot_gradient_predictiveness(
+            grad_predictiveness_vgg_bn,
+            f'VGG+BN (lr={lr})',
+            os.path.join(figures_path, f'vgg_bn_gradient_predictiveness_lr_{lr}.png')
+        )
+        
+        # 绘制对比图
+        plt.figure(figsize=(12, 6))
+        plt.plot(grad_predictiveness_vgg, label='VGG', color='#8FBC8F')
+        plt.plot(grad_predictiveness_vgg_bn, label='VGG+BN', color='#DB7093')
+        plt.title(f'Gradient Predictiveness Comparison (lr={lr})')
+        plt.xlabel('Lag')
+        plt.ylabel('Normalized Autocorrelation')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(figures_path, f'gradient_predictiveness_comparison_lr_{lr}.png'))
+        plt.close()
+    
     print(f"{'='*50}")
     print(f"训练完成，开始绘制损失景观...")
     print(f"{'='*50}")
