@@ -122,12 +122,16 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
             # 反向传播前记录损失
             loss.backward()
             
-            # 获取梯度信息 (对于分类器层的梯度)
-            if hasattr(model, 'classifier') and len(model.classifier) > 4:
-                # 记录分类器中第5个层(索引4)的梯度
-                if model.classifier[4].weight.grad is not None:
-                    current_grad = model.classifier[4].weight.grad.norm().item()
-                    grad.append(current_grad)
+            # 记录整个网络的梯度信息
+            total_grad_norm = 0.0
+            param_count = 0
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    total_grad_norm += param.grad.norm().item()
+                    param_count += 1
+            if param_count > 0:
+                avg_grad_norm = total_grad_norm / param_count
+                grad.append(avg_grad_norm)
             
             optimizer.step()
 
@@ -163,12 +167,8 @@ def plot_loss_landscape(min_curve, max_curve, title="Loss Landscape", save_path=
         min_curve = np.array(min_curve).flatten()
         max_curve = np.array(max_curve).flatten()
         
-        # 打印用于调试的信息（截断显示）
-        print(f"绘制 {title} 损失景观:")
-        print(f"  min_curve类型: {type(min_curve)}, 长度: {len(min_curve)}")
-        print(f"  min_curve前5个值: {min_curve[:5]}")
-        print(f"  max_curve类型: {type(max_curve)}, 长度: {len(max_curve)}")
-        print(f"  max_curve前5个值: {max_curve[:5]}")
+        # 准备绘图数据
+        print(f"绘制损失景观: {title}")
         
         # 创建图形
         plt.figure(figsize=(12, 8))
@@ -203,32 +203,24 @@ def compute_loss_curves(losses_lists):
     
     try:
         # 将每个模型的所有batch损失值展平到一个列表中
-        print("开始处理损失数据...")
         flattened_losses = []
         for i, model_losses in enumerate(losses_lists):
             # 展平每个模型的所有epoch的所有batch损失
-            print(f"处理模型 {i+1} 的损失数据:")
-            print(f"  模型有 {len(model_losses)} 个epoch")
-            
             model_flat_losses = []
             for j, epoch_losses in enumerate(model_losses):
                 if isinstance(epoch_losses, list):
-                    print(f"  epoch {j+1} 有 {len(epoch_losses)} 个batch")
                     model_flat_losses.extend(epoch_losses)
                 else:
-                    print(f"  警告: epoch {j+1} 的数据不是列表: {type(epoch_losses)}")
+                    print(f"警告: 模型 {i+1}, epoch {j+1} 的数据不是列表")
             
-            print(f"  模型 {i+1} 总共有 {len(model_flat_losses)} 个batch")
             flattened_losses.append(model_flat_losses)
         
         # 找到最短的展平后损失列表长度
         if flattened_losses:
             lengths = [len(flat_losses) for flat_losses in flattened_losses]
             min_length = min(lengths)
-            print(f"所有模型中最短的batch数量: {min_length}")
         else:
             min_length = 0
-            print("没有损失数据，返回空列表")
             return [], []
         
         min_curve = []
@@ -245,55 +237,45 @@ def compute_loss_curves(losses_lists):
                 min_curve.append(min(step_losses))
                 max_curve.append(max(step_losses))
         
-        print(f"生成了min_curve(长度:{len(min_curve)})和max_curve(长度:{len(max_curve)})")
         return min_curve, max_curve
     except Exception as e:
         print(f"计算损失曲线时发生错误: {e}")
         # 返回空列表，避免程序崩溃
         return [], []
 
-def compute_gradient_predictiveness(grads_list, window_size=20):
+def process_gradients(grads_list):
     """
-    计算梯度可预测性
+    处理梯度列表，返回展平的梯度列表
     grads_list: 每个epoch的梯度列表 [[epoch1_grads], [epoch2_grads], ...]
-    window_size: 滑动窗口大小，设置为20以匹配自相关性的lag数量
     """
     # 将所有epoch的梯度展平为一个列表
     all_grads = []
     for epoch_grads in grads_list:
         all_grads.extend(epoch_grads)
     
-    # 使用滑动窗口计算梯度变化
-    num_windows = len(all_grads) // window_size
-    predictiveness = []
+    # 过滤异常值
+    all_grads = [g for g in all_grads if g is not None and not np.isnan(g) and not np.isinf(g)]
     
-    for i in range(num_windows):
-        start_idx = i * window_size
-        end_idx = start_idx + window_size
-        window_grads = all_grads[start_idx:end_idx]
-        
-        # 计算窗口内的梯度变化
-        grad_changes = np.diff(window_grads)
-        
-        # 计算窗口内的自相关性
-        autocorr = np.correlate(grad_changes, grad_changes, mode='full')[:window_size]
-        # 归一化自相关性
-        autocorr = autocorr / autocorr[0]
-        predictiveness.append(autocorr)
-    
-    # 计算所有窗口的平均预测性
-    mean_predictiveness = np.mean(predictiveness, axis=0)
-    
-    return mean_predictiveness
+    return all_grads
 
-def plot_gradient_predictiveness(predictiveness, title, save_path):
-    """绘制梯度可预测性"""
+def plot_gradient_norms(grad_list, title, save_path):
+    """绘制梯度范数随时间变化图"""
     plt.figure(figsize=(10, 6))
-    plt.plot(predictiveness)
-    plt.title(f'Gradient Predictiveness: {title}')
-    plt.xlabel('Lag')
-    plt.ylabel('Normalized Autocorrelation')
-    plt.grid(True)
+    # 绘制原始梯度范数
+    plt.plot(grad_list, linewidth=1, alpha=0.7, label='原始梯度')
+    
+    # 绘制平滑后的梯度范数趋势（使用移动平均）
+    if len(grad_list) > 20:
+        window_size = min(20, len(grad_list) // 5)
+        smoothed = np.convolve(grad_list, np.ones(window_size)/window_size, mode='valid')
+        plt.plot(range(window_size-1, window_size-1+len(smoothed)),
+                smoothed, linewidth=2, color='red', label='移动平均')
+    
+    plt.title(f'梯度范数变化: {title}')
+    plt.xlabel('训练步骤')
+    plt.ylabel('梯度范数')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
     plt.savefig(save_path)
     plt.close()
 
@@ -365,9 +347,6 @@ def main():
         for epoch_losses in model_losses:
             flat_losses.extend(epoch_losses)
         np.savetxt(os.path.join(loss_save_path, f'loss_vgg_lr_{lr}.txt'), flat_losses, fmt='%.6f')
-        
-        # 简化梯度保存，先跳过保存梯度信息以避免错误
-        # np.savetxt(os.path.join(grad_save_path, f'grads_vgg_lr_{lr}.txt'), model_grads, fmt='%s', delimiter=' ')
 
     # 对每个学习率训练VGG_BN模型
     for lr in learning_rates:
@@ -386,58 +365,46 @@ def main():
         for epoch_losses in model_losses_bn:
             flat_losses_bn.extend(epoch_losses)
         np.savetxt(os.path.join(loss_save_path, f'loss_vgg_bn_lr_{lr}.txt'), flat_losses_bn, fmt='%.6f')
-        
-        # 简化梯度保存，先跳过保存梯度信息以避免错误
-        # np.savetxt(os.path.join(grad_save_path, f'grads_vgg_bn_lr_{lr}.txt'), model_grads_bn, fmt='%s', delimiter=' ')
 
-    # 计算VGG模型的min_curve和max_curve
-    # 调试信息，帮助理解数据结构
-    print(f"VGG模型数量: {len(losses_lists_vgg)}")
-    
-    # 计算每个模型的总batch数
-    if losses_lists_vgg:
-        total_batches = 0
-        for epoch_losses in losses_lists_vgg[0]:
-            total_batches += len(epoch_losses)
-        print(f"VGG第一个模型的总batch数: {total_batches}")
-    
     # 计算VGG模型的min_curve和max_curve
     min_curve_vgg, max_curve_vgg = compute_loss_curves(losses_lists_vgg)
     
     # 计算VGG_BN模型的min_curve和max_curve
     min_curve_vgg_bn, max_curve_vgg_bn = compute_loss_curves(losses_lists_vgg_bn)
     
-    # 计算梯度可预测性
-    print("计算梯度可预测性...")
+    # 绘制梯度范数变化图
+    print("绘制梯度范数变化图...")
     for i, lr in enumerate(learning_rates):
-        # 计算VGG的梯度可预测性
-        grad_predictiveness_vgg = compute_gradient_predictiveness(grads_lists_vgg[i])
-        plot_gradient_predictiveness(
-            grad_predictiveness_vgg,
+        # 处理VGG的梯度数据
+        vgg_grads = process_gradients(grads_lists_vgg[i])
+        plot_gradient_norms(
+            vgg_grads,
             f'VGG (lr={lr})',
-            os.path.join(figures_path, f'vgg_gradient_predictiveness_lr_{lr}.png')
+            os.path.join(figures_path, f'vgg_gradient_norms_lr_{lr}.png')
         )
         
-        # 计算VGG_BN的梯度可预测性
-        grad_predictiveness_vgg_bn = compute_gradient_predictiveness(grads_lists_vgg_bn[i])
-        plot_gradient_predictiveness(
-            grad_predictiveness_vgg_bn,
+        # 处理VGG_BN的梯度数据
+        vgg_bn_grads = process_gradients(grads_lists_vgg_bn[i])
+        plot_gradient_norms(
+            vgg_bn_grads,
             f'VGG+BN (lr={lr})',
-            os.path.join(figures_path, f'vgg_bn_gradient_predictiveness_lr_{lr}.png')
+            os.path.join(figures_path, f'vgg_bn_gradient_norms_lr_{lr}.png')
         )
         
         # 绘制对比图
         plt.figure(figsize=(12, 6))
-        plt.plot(grad_predictiveness_vgg, label='VGG', color='#8FBC8F')
-        plt.plot(grad_predictiveness_vgg_bn, label='VGG+BN', color='#DB7093')
-        plt.title(f'Gradient Predictiveness Comparison (lr={lr})')
-        plt.xlabel('Lag')
-        plt.ylabel('Normalized Autocorrelation')
+        # 如果梯度数据太多，进行降采样以提高可读性
+        sample_rate = max(1, len(vgg_grads) // 500)  # 最多显示500个点
+        plt.plot(vgg_grads[::sample_rate], label='VGG', color='#8FBC8F', alpha=0.7)
+        plt.plot(vgg_bn_grads[::sample_rate], label='VGG+BN', color='#DB7093', alpha=0.7)
+        plt.title(f'梯度范数对比 (lr={lr})')
+        plt.xlabel('训练步骤')
+        plt.ylabel('梯度范数')
         plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(figures_path, f'gradient_predictiveness_comparison_lr_{lr}.png'))
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(figures_path, f'gradient_norms_comparison_lr_{lr}.png'))
         plt.close()
-    
+
     print(f"{'='*50}")
     print(f"训练完成，开始绘制损失景观...")
     print(f"{'='*50}")
