@@ -50,3 +50,6 @@ data/cifar-10-batches-py/
 wandb/
 
 *.txt
+
+# latex 中间文件
+build/

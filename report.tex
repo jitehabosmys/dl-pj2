@@ -1,0 +1,377 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage{ctex}  % 支持中文
+\usepackage{graphicx}  % 插入图片
+\usepackage{amsmath,amssymb}  % 数学公式
+\usepackage{booktabs}  % 表格
+\usepackage{hyperref}  % 超链接
+\usepackage{geometry}  % 页面设置
+\usepackage{listings}  % 代码
+\usepackage{color}  % 颜色
+\usepackage{xcolor}  % 增强颜色
+\usepackage{subcaption}  % 子图
+\usepackage{float}  % 控制浮动体
+
+% 页面设置
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% 代码环境设置
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.95}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+% 标题信息
+\title{神经网络与深度学习 - 项目2报告\\CIFAR-10分类与批归一化分析}
+\author{22307110196 Oscar Yin}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% 1. 引言
+\section{引言}
+% 项目背景和目标
+\subsection{项目背景和目标}
+本项目是“神经网络与深度学习”课程的第二个项目。项目的主要目标包括两个部分：
+
+第一部分需要在CIFAR-10数据集上训练神经网络模型，以优化分类性能。CIFAR-10是一个广泛使用的视觉识别数据集，包含60,000张32×32彩色图像，分属10个不同类别，每个类别有6,000张图像。
+
+在这部分任务中，我们需要构建包含全连接层、2D卷积层、2D池化层和激活函数等基本组件的网络，并尝试加入批归一化层、残差连接等高级组件。同时，我们还需要通过调整不同的神经元/滤波器数量、尝试不同的损失函数和激活函数，以及选择不同的优化器等策略来优化网络性能。
+
+第二部分要求研究批归一化技术。批归一化是一种广泛采用的技术，它能够使深度神经网络的训练更快、更稳定。在这部分中，我们将使用与VGG-A相同架构的网络，比较有无批归一化版本模型的性能差异，并通过可视化损失景观等研究BN如何影响优化过程。
+
+本报告将详细记录实验过程和主要发现，解释实验结果，并提供对批归一化作用机制的深入分析。
+
+% 2. 在CIFAR-10上训练网络
+\section{在CIFAR-10上训练网络}
+
+% 网络架构设计
+\subsection{网络架构设计}
+
+在本项目中，我们采用了基于ResNet架构的卷积神经网络，并且针对 CIFAR-10 数据集做了适应性调整。我们的ResNet实现包含以下关键组件：
+
+\begin{itemize}
+    \item \textbf{输入层}：接收32×32×3的CIFAR-10图像
+    \item \textbf{初始卷积层}：使用3×3卷积核（而非原始ResNet中的7×7），将输入通道从3扩展到64
+    \item \textbf{残差块}：每个残差块包含两个3×3卷积层，每个卷积后接BatchNorm和激活函数，以及可选的1×1卷积用于调整通道数
+    \item \textbf{残差连接}：将输入直接添加到残差块的输出，缓解梯度消失问题
+    \item \textbf{全局平均池化}：在最后一个残差块后，使用全局平均池化减少特征图尺寸
+    \item \textbf{全连接层}：将池化后的特征映射到10个类别
+\end{itemize}
+
+与原始ResNet相比，我们的实现针对CIFAR-10数据集进行了以下调整：
+\begin{itemize}
+    \item 使用\textbf{3x3}而非7×7的初始卷积核，适应32×32的小图像
+    \item \textbf{不进行全局下采样池化}，保留更多空间信息
+    \item 允许灵活配置网络深度（通过num\_blocks参数）和激活函数类型
+\end{itemize}
+
+
+\subsection{实验设置与优化策略}
+
+在实验探索阶段，为了平衡训练成本和实验效果，我们首先使用较小的模型和默认配置进行实验，大约8分钟可以完成一次训练。根据探索的结果，我们再训练较大的模型，并报告最优结果。表\ref{tab:default_settings}列出了实验的默认设置。
+
+\begin{table}[htbp]
+\centering
+\caption{实验默认设置}
+\label{tab:default_settings}
+\begin{tabular}{ll}
+\toprule
+\textbf{参数} & \textbf{默认值} \\
+\midrule
+模型 & ResNet([1,1,1,1])，共10层 \\
+训练轮次 & 25 \\
+优化器 & SGD（动量0.9，权重衰减5e-4） \\
+学习率调度器 & 余弦退火（周期与训练轮次相同） \\
+损失函数 & 交叉熵 \\
+激活函数 & ReLU \\
+学习率 & 0.1 \\
+批次大小 & 128 \\
+数据增强 & 随机裁剪、水平翻转、归一化 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+部分默认设置的选择基于以下考虑：
+\begin{itemize}
+    \item \textbf{模型大小}：ResNet([1,1,1,1])是一个相对较小的模型，参数量适中（4.90M），适合快速实验
+    \item \textbf{训练轮次}：25轮通常足以显示不同实验配置的区别
+    \item \textbf{优化器}：SGD配合动量和权重衰减，有助于训练的稳定性
+    \item \textbf{学习率调度}：余弦退火可以在训练初期使用较大学习率加速收敛，后期降低学习率提高精度
+\end{itemize}
+
+在完成初步探索后，我们根据实验结果调整了部分超参数，并尝试了不同的网络深度、激活函数和优化器，以寻找最佳性能配置。
+
+% 优化策略
+\subsection{实验结果与分析}
+
+% 不同网络深度对比实验
+\subsubsection{不同网络深度对比实验}
+
+我们首先评估了不同深度（对应了不同的卷积核数量）的ResNet模型在CIFAR-10数据集上的性能。表\ref{tab:basic_model}展示了不同网络深度的实验结果。
+
+\begin{table}[htbp]
+\centering
+\caption{不同网络深度的ResNet模型性能对比}
+\label{tab:basic_model}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{模型配置} & \textbf{参数量} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} & \textbf{训练时间(分钟)} \\
+\midrule
+ResNet([1,1,1,1]) & 4.90M & 91.72\% & 92.07\% & 7.5 \\
+ResNet([1,2,1,2]) & 9.92M & 91.82\% & 91.75\% & 9.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表\ref{tab:basic_model}可以看出，增加网络深度对模型性能的影响相对有限。更深的ResNet([1,2,1,2])模型在验证集上表现略微胜出，而在测试集上的表现略有下降。
+一方面，这表明对于CIFAR-10数据集，较浅的ResNet模型已经足够捕捉数据中的特征，增加网络深度并不一定能带来性能提升；
+另一方面，25轮的训练轮次可能足以让较浅的模型良好收敛，但对较深的模型则不足，这点可以从后面训练最佳模型的过程加以印证。
+
+% 激活函数对比实验
+\subsubsection{激活函数对比实验}
+
+激活函数是神经网络中的关键组件，它决定了神经元的输出形式。我们比较了ReLU、Sigmoid和Tanh三种常用激活函数在ResNet模型上的表现。表\ref{tab:activation_functions}展示了实验结果。
+
+\begin{table}[htbp]
+\centering
+\caption{不同激活函数的性能对比}
+\label{tab:activation_functions}
+\begin{tabular}{lcc}
+\toprule
+\textbf{激活函数} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} \\
+\midrule
+ReLU & 91.72\% & 92.07\% \\
+Sigmoid & 40.40\% & 27.23\% \\
+Tanh & 85.12\% & 84.76\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表\ref{tab:activation_functions}可以看出，ReLU激活函数在验证集和测试集上都取得了最佳性能，分别达到91.72\%和92.07\%的准确率。Tanh激活函数表现次之，而Sigmoid激活函数的表现显著较差，测试准确率仅为27.23\%。
+
+ReLU激活函数的优势在于其简单性和非饱和特性，可以有效缓解梯度消失问题，同时计算效率高。Tanh激活函数虽然理论上可以输出负值，但其饱和特性可能导致梯度消失问题，特别是在深层网络中，这可能是其性能不如ReLU的原因。Sigmoid激活函数的表现最差，这主要是因为其在深层网络中容易导致梯度消失问题，使得模型难以有效学习。
+不同激活函数模型的验证损失可视化对比如图\ref{fig:activation}：
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{results/images/activation.png}
+    \caption{不同激活函数模型的验证损失}
+    \label{fig:activation}
+\end{figure}
+
+值得注意的是，Sigmoid激活函数在训练过程中出现了严重的性能退化，验证准确率从初始的28.50\%逐渐下降到最低点9.88\%，最终稳定在40.40\%，这表明Sigmoid激活函数在ResNet架构中确实存在严重的训练问题。
+
+% 损失函数对比实验
+\subsubsection{损失函数对比实验}
+
+损失函数的选择对模型训练和性能有重要影响。我们比较了交叉熵损失和均方误差（MSE）损失在ResNet模型上的表现。表\ref{tab:loss_functions}展示了实验结果。
+
+\begin{table}[htbp]
+\centering
+\caption{不同损失函数的性能对比}
+\label{tab:loss_functions}
+\begin{tabular}{lcc}
+\toprule
+\textbf{损失函数} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} \\
+\midrule
+交叉熵损失 & 91.72\% & 92.07\% \\
+均方误差损失 & 91.38\% & 91.87\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表\ref{tab:loss_functions}可以看出，均方误差损失则分别达到91.38\%和91.87\%的准确率，虽然不如交叉熵损失，但也能达到不错的性能。
+均方误差作为损失函数的模型表现是出乎意料的，因为我们预计均方误差损失在分类任务中表现会非常差。
+
+通常而言，均方损失的误差表面比交叉熵损失更平坦，在深层网络中容易导致梯度消失问题。本实验中两种损失函数都能达到较高的准确率，这表明ResNet架构本身具有较强的特征提取与缓解梯度消失的能力，即使使用次优的损失函数也能获得不错的性能。
+然而，在追求最佳性能时，交叉熵损失仍然是分类任务的首选。
+不同损失函数模型的验证集准确率可视化对比如图\ref{fig:loss_acc}：
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{results/images/loss_acc.png}
+    \caption{不同损失函数模型的验证集准确率}
+    \label{fig:loss_acc}
+\end{figure}
+
+
+
+
+% 权重衰减对比实验
+\subsubsection{权重衰减对比实验}
+
+给损失函数添加L2正则化项是防止模型过拟合的重要技术。由于在使用 SGD 优化器时，这个操作等价于权重衰减，
+因此我们比较了不同权重衰减值对模型性能的影响。表\ref{tab:weight_decay}展示了实验结果。
+我们比较了不同权重衰减值对模型性能的影响。表\ref{tab:weight_decay}展示了实验结果。
+
+\begin{table}[htbp]
+\centering
+\caption{不同权重衰减值的性能对比}
+\label{tab:weight_decay}
+\begin{tabular}{lcc}
+\toprule
+\textbf{权重衰减} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} \\
+\midrule
+0.0005 & 91.72\% & 92.07\% \\
+0.01 & 84.62\% & 85.34\% \\
+0.0 & 90.42\% & 90.06\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表\ref{tab:weight_decay}可以看出，权重衰减值对模型性能有显著影响。适中的权重衰减值（0.0005）取得了最佳性能，在测试集上达到92.07\%的准确率。无权重衰减（0.0）的表现次之，测试准确率为90.06\%。而较大的权重衰减值（0.01）则显著降低了模型性能，测试准确率降至85.34\%。
+
+这表明对于CIFAR-10数据集和ResNet模型，适度的正则化（权重衰减值为0.0005）有助于提高模型性能，而过强的正则化（权重衰减值为0.01）则可能导致模型欠拟合。值得注意的是，即使不使用权重衰减，模型仍然能够达到90.06\%的测试准确率，
+这表明ResNet架构本身具有一定的正则化效果，可能通过残差连接和批量归一化层实现。
+不同权重衰减值模型的训练集准确率可视化对比如图\ref{fig:decay_train}：
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{results/images/decay_train.png}
+\caption{不同权重衰减值模型的训练集准确率}
+    \label{fig:decay_train}
+\end{figure}
+
+可以发现，权重衰减值为0.001的模型的训练集损失下降缓慢，这是因为权重衰减值过大，导致模型欠拟合。
+
+
+% 优化器对比实验
+\subsubsection{优化器对比实验}
+
+优化器的选择对模型训练至关重要。我们比较了SGD、Adam和RMSprop三种常用优化器的性能。表\ref{tab:optimizers}展示了实验结果。
+
+\begin{table}[htbp]
+\centering
+\caption{不同优化器的性能对比}
+\label{tab:optimizers}
+\begin{tabular}{lcc}
+\toprule
+\textbf{优化器} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} \\
+\midrule
+SGD & 91.72\% & 92.07\% \\
+Adam & 50.70\% & 52.52\% \\
+RMSprop & 50.92\% & 53.48\% \\
+Adam(lr=0.001) & 91.42\% & 90.97\% \\
+RMSprop(lr=0.0001) & 87.60\% & 86.72\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表\ref{tab:optimizers}可以看出，SGD优化器在验证集和测试集上都取得了最佳性能，分别达到91.72\%和92.07\%的准确率。Adam和RMSprop的表现显著较差，Adam的测试准确率仅为52.52\%，而RMSprop的测试准确率仅为53.48\%。
+
+Adam和RMSprop具有自适应学习率的优势，但在ResNet模型上表现不佳，这是因为我们使用了过高的学习率（0.1）。对于Adam和RMSprop这类自适应优化器，通常需要使用较小的学习率（如0.001或0.0001）才能获得良好性能，否则学习率在初始阶段可能会因为除法操作而变得非常大，导致模型训练不稳定。
+
+事实也确实如此，尝试使用较小的学习率后，Adam和RMSprop的性能得到了显著提升。这表明自适应优化器虽然理论上具有优势，但在实际应用中需要更谨慎地调整学习率等超参数。
+
+% 最佳模型配置
+\subsubsection{最佳模型配置}
+
+基于上述实验结果，我们确定了最佳模型配置，并在更大的模型上进行了训练。表\ref{tab:best_model}展示了最佳配置的性能。
+
+\begin{table}[htbp]
+\centering
+\caption{最佳模型配置性能}
+\label{tab:best_model}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{模型配置} & \textbf{参数量} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} & \textbf{训练时间(分钟)} \\
+\midrule
+ResNet([1,1,1,1]) & 4.90M & 91.72\% & 92.07\% & 7.5 \\
+ResNet([1,2,1,2]) & 9.92M & 91.82\% & 91.75\% & 9.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表\ref{tab:best_model}可以看出，使用最佳配置（ReLU激活函数、权重衰减0.0005、SGD优化器、批量归一化）训练的ResNet([1,1,1,1])模型在测试集上达到了92.07\%的准确率，这是我们在这个实验阶段取得的最佳结果。
+
+有趣的是，增加网络深度（ResNet([1,2,1,2])）并没有带来性能提升，反而略有下降。这表明对于CIFAR-10数据集，较浅的ResNet模型已经足够捕捉数据中的特征，增加网络深度并不一定能带来性能提升。这可能是因为CIFAR-10数据集的复杂度相对较低，不需要非常深的网络就能达到良好的分类效果。
+
+值得注意的是，即使是最小的ResNet([1,1,1,1])模型，其参数量也达到了4.90M，这已经足够复杂以捕捉CIFAR-10数据集中的大部分特征。在后续实验中，我们可以尝试更深的模型（如ResNet([2,2,2,2])或ResNet([3,3,3,3])），以探索网络深度对性能的影响。
+
+% 结果可视化
+
+% 3. 批归一化研究
+\section{批归一化研究}
+
+% VGG-A对比实验
+\subsection{VGG-A对比实验}
+% 有无BatchNorm的VGG-A实现
+\subsubsection{有无BatchNorm的VGG-A实现}
+
+% 训练过程对比（收敛速度、准确率等）
+\subsubsection{训练过程对比}
+
+% 批归一化如何帮助优化
+\subsection{批归一化如何帮助优化}
+% 损失景观分析（Loss Landscape）
+\subsubsection{损失景观分析}
+
+% 梯度可预测性分析
+\subsubsection{梯度可预测性分析}
+
+% 不同学习率下的表现对比
+\subsubsection{不同学习率下的表现对比}
+
+% 结果讨论
+\subsection{结果讨论}
+% 批归一化的作用机制解释
+\subsubsection{批归一化的作用机制解释}
+
+% 实验结果与理论分析的对应关系
+\subsubsection{实验结果与理论分析的对应关系}
+
+% 4. 结论
+\section{结论}
+% 主要发现总结
+\subsection{主要发现总结}
+
+% 实验启示
+\subsection{实验启示}
+
+% 未来工作方向
+\subsection{未来工作方向}
+
+% 参考文献
+\section{参考文献}
+\begin{thebibliography}{9}
+\bibitem{PyTorch} PyTorch tutorial, \url{https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html}
+\bibitem{CIFAR} CIFAR-10 dataset, \url{https://www.cs.toronto.edu/~kriz/cifar.html}
+\bibitem{BN} Ioffe, Sergey, and Christian Szegedy. "Batch normalization: Accelerating deep network training by reducing internal covariate shift." ICML 2015.
+\bibitem{BN_smoothing} Santurkar, Shibani, et al. "How does batch normalization help optimization?" NeurIPS 2018.
+\end{thebibliography}
+
+% 附录
+\section{附录}
+% 代码链接
+\subsection{代码链接}
+代码仓库链接：\url{https://github.com/...}
+
+% 模型权重链接
+\subsection{模型权重链接}
+模型权重下载链接：\url{https://...}
+
+% 其他补充材料
+\subsection{其他补充材料}
+
+\end{document} 
