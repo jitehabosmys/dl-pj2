@@ -49,6 +49,8 @@ def parse_args():
                         help='随机种子 (默认: 2020)')
     parser.add_argument('--skip_steps', type=int, default=25,
                         help='绘制损失景观时要跳过的初始步骤数 (默认: 25)')
+    parser.add_argument('--plot_sample_rate', type=int, default=1,
+                        help='可视化时每隔多少个点画一个（默认1，全部画）')
     args = parser.parse_args()
     
     # 将逗号分隔的字符串转换为浮点数列表
@@ -314,20 +316,30 @@ def main():
         min_curve_vgg_bn = min_curve_vgg_bn[skip_steps:]
         max_curve_vgg_bn = max_curve_vgg_bn[skip_steps:]
         
+        # 采样
+        sample_rate = args.plot_sample_rate
+        steps_vgg = np.arange(len(min_curve_vgg))[::sample_rate]
+        min_curve_vgg = min_curve_vgg[::sample_rate]
+        max_curve_vgg = max_curve_vgg[::sample_rate]
+        steps_vgg_bn = np.arange(len(min_curve_vgg_bn))[::sample_rate]
+        min_curve_vgg_bn = min_curve_vgg_bn[::sample_rate]
+        max_curve_vgg_bn = max_curve_vgg_bn[::sample_rate]
+        
         print(f"已跳过前 {skip_steps} 个训练步骤，损失景观包含 {len(min_curve_vgg)} 个点")
         
         # 检查数组长度，确保至少有数据可以绘图
         if len(min_curve_vgg) > 0 and len(max_curve_vgg) > 0 and len(min_curve_vgg_bn) > 0 and len(max_curve_vgg_bn) > 0:
             plt.figure(figsize=(12, 8))
             
-            steps_vgg = range(len(min_curve_vgg))
-            steps_vgg_bn = range(len(min_curve_vgg_bn))
-            
-            # 使用更美观的颜色填充区域
-            plt.fill_between(steps_vgg, min_curve_vgg, max_curve_vgg, 
-                            alpha=0.35, color='#8FBC8F', label='Standard VGG')
-            plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, 
-                            alpha=0.35, color='#DB7093', label='Standard VGG + BatchNorm')
+            # 只有学习率列表长度大于1时才填充，否则只画一条线
+            if len(args.learning_rates) > 1:
+                plt.fill_between(steps_vgg, min_curve_vgg, max_curve_vgg, 
+                                alpha=0.35, color='#8FBC8F', label='Standard VGG')
+                plt.fill_between(steps_vgg_bn, min_curve_vgg_bn, max_curve_vgg_bn, 
+                                alpha=0.35, color='#DB7093', label='Standard VGG + BatchNorm')
+            else:
+                plt.plot(steps_vgg, min_curve_vgg, color='#8FBC8F', label='Standard VGG')
+                plt.plot(steps_vgg_bn, min_curve_vgg_bn, color='#DB7093', label='Standard VGG + BatchNorm')
             
             plt.title('Loss Landscape', fontsize=18, pad=20)
             plt.xlabel('Steps', fontsize=14)
