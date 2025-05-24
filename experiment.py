@@ -14,9 +14,8 @@ import time
 import random
 import numpy as np
 import multiprocessing
-import wandb  # 导入wandb
+import wandb  
 
-# 导入自定义模块
 from utils.model_utils import count_parameters, save_model
 
 # 定义进度条函数
@@ -27,7 +26,7 @@ def progress_bar(current, total, msg=None):
     else:
         print(f'[{current}/{total}]', end='\r')
 
-# ResNet模型定义 (复制自models/resnet.py)
+# ResNet模型定义
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -78,8 +77,7 @@ class ResNet(nn.Module):
         
         self.layers = nn.ModuleList(layers)
         
-        # 确定最后一层的通道数
-        if len(layers) == 0:  # 如果没有层
+        if len(layers) == 0: 
             final_channels = 64
         else:
             if len(num_blocks) >= 4 and num_blocks[3] > 0:
@@ -124,17 +122,15 @@ def create_resnet(num_blocks_str, activation_name='relu'):
     }
     activation = activation_map.get(activation_name, F.relu)
     
-    # 解析num_blocks参数
     blocks = [int(x) for x in num_blocks_str.split(',')]
-    
-    # 如果只提供一个数字，填充到四层
+
     if len(blocks) == 1:
         blocks = blocks * 4
     
     # 填充或截断到四层
     while len(blocks) < 4:
-        blocks.append(1)  # 填充剩余层为1
-    blocks = blocks[:4]  # 截断到四层
+        blocks.append(1) 
+    blocks = blocks[:4] 
     
     # 打印网络结构
     print(f"创建ResNet，层数配置: {blocks}, 激活函数: {activation_name}")
@@ -212,8 +208,8 @@ args = parser.parse_args()
 
 # 设置设备
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-best_acc = 0  # 最佳测试准确率
-start_epoch = 0  # 从第0个epoch开始
+best_acc = 0  
+start_epoch = 0 
 
 # 设置随机种子函数
 def set_seed(seed=42):
@@ -222,11 +218,9 @@ def set_seed(seed=42):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
-    # 设置确定性模式
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-# 设置随机种子
 set_seed(args.seed)
 
 # 数据准备
@@ -251,14 +245,13 @@ train_loader = None
 val_loader = None
 
 if args.validation_split > 0:
-    # 划分训练集和验证集
+
     from torch.utils.data.sampler import SubsetRandomSampler
     
     dataset_size = len(trainset)
     indices = list(range(dataset_size))
     val_size = int(args.validation_split * dataset_size)
     
-    # 设置随机种子确保可重复性
     random.seed(args.seed)
     random.shuffle(indices)
     
@@ -278,7 +271,7 @@ if args.validation_split > 0:
     
     print(f'训练集大小: {len(train_indices)}, 验证集大小: {len(val_indices)}')
 else:
-    # 不使用验证集，全部数据用于训练
+    
     train_loader = torch.utils.data.DataLoader(
         trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     print(f'使用全部训练数据，无验证集')
@@ -357,7 +350,7 @@ if args.use_wandb:
         
         # 初始化wandb
         wandb.init(
-            project='cifar-pj',  # 固定项目名为cifar-pj
+            project='cifar-pj',  
             name=run_name,
             config={
                 "num_blocks": args.num_blocks,
@@ -511,7 +504,7 @@ def main():
     val_losses = []
     val_accs = []
 
-    # 用于早停的变量
+   
     best_val_loss = float('inf')
     best_model_state = None
     early_stopping_counter = 0
@@ -556,7 +549,6 @@ def main():
                 early_stopping_counter += 1
                 print(f'EarlyStopping 计数器: {early_stopping_counter}/{args.patience}')
                 
-                # 如果连续args.patience个epoch验证损失没有改善，停止训练
                 if early_stopping_counter >= args.patience:
                     print(f'Early stopping 在 epoch {epoch+1}')
                     # 恢复到最佳模型状态
@@ -614,6 +606,5 @@ def main():
             print(f"关闭wandb时出错: {e}")
 
 if __name__ == "__main__":
-    # 在Windows上需要添加这一行以支持多进程
     multiprocessing.freeze_support()
     main() 

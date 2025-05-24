@@ -147,13 +147,13 @@ def main():
     # 创建模型实例
     model = get_model(args.model)
     
-    # 加载预训练权重（使用修改后的函数）
+    # 加载预训练权重
     load_success, checkpoint = load_model(model, model_name, save_dir=args.model_dir)
     if not load_success:
         print(f"无法加载模型，请先训练模型或检查模型文件路径。")
         return
     
-    # 提取和打印额外信息（如果有）
+    # 提取和打印额外信息
     if checkpoint is not None and args.verbose:
         # 适应不同的键名格式
         if 'epoch' in checkpoint:
@@ -171,7 +171,6 @@ def main():
     model = model.to(device)
     model.eval()
     
-    # 如果需要详细信息，则打印模型参数量
     if args.verbose:
         param_count = count_parameters(model)
         print(f"模型有 {param_count:.2f}M 参数")

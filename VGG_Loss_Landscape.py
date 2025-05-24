@@ -27,13 +27,11 @@ batch_size = 128
 figures_path = 'results/images'
 models_path = 'results/models'
 loss_save_path = 'results'
-grad_save_path = 'results'
 
 # 确保目录存在
 os.makedirs(figures_path, exist_ok=True)
 os.makedirs(models_path, exist_ok=True)
 os.makedirs(loss_save_path, exist_ok=True)
-os.makedirs(grad_save_path, exist_ok=True)
 
 # Make sure you are using the right device.
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -100,7 +98,6 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
 
     batches_n = len(train_loader)
     losses_list = []  # 所有步骤的损失列表
-    grads = []      # 所有步骤的梯度列表
     
     for epoch in tqdm(range(epochs_n), unit='epoch'):
         if scheduler is not None:
@@ -108,7 +105,6 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
         model.train()
 
         loss_list = []  # 当前epoch的损失列表
-        grad = []       # 当前epoch的梯度列表
         learning_curve[epoch] = 0  # 当前epoch的平均损失
 
         for data in train_loader:
@@ -123,22 +119,10 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
             loss_list.append(loss.item())
             learning_curve[epoch] += loss.item()
             
-            # 反向传播前记录损失
             loss.backward()
-            
-            # 记录整个网络的梯度信息
-            total_grad_norm = 0.0
-            for name, param in model.named_parameters():
-                if param.grad is not None:
-                    total_grad_norm += param.grad.norm().item() ** 2  # 平方和
-            # 计算总范数(而非平均值)
-            total_grad_norm = np.sqrt(total_grad_norm)  # 平方和的平方根
-            grad.append(total_grad_norm)
-            
             optimizer.step()
 
         losses_list.append(loss_list)
-        grads.append(grad)
         
         # 计算当前epoch的平均损失
         learning_curve[epoch] /= batches_n
@@ -159,9 +143,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
         else:
             print(f"Epoch {epoch+1}/{epochs_n}, Loss: {learning_curve[epoch]:.4f}, Train Acc: {train_accuracy:.2f}%")
 
-    return losses_list, grads
-
-# 这个函数不再需要，我们将直接在主函数中绘制对比图
+    return losses_list
 
 # 计算min_curve和max_curve
 def compute_loss_curves(losses_lists):
@@ -214,23 +196,6 @@ def compute_loss_curves(losses_lists):
         # 返回空列表，避免程序崩溃
         return [], []
 
-def process_gradients(grads_list):
-    """
-    处理梯度列表，返回展平的梯度列表
-    grads_list: 每个epoch的梯度列表 [[epoch1_grads], [epoch2_grads], ...]
-    """
-    # 将所有epoch的梯度展平为一个列表
-    all_grads = []
-    for epoch_grads in grads_list:
-        all_grads.extend(epoch_grads)
-    
-    # 过滤异常值
-    all_grads = [g for g in all_grads if g is not None and not np.isnan(g) and not np.isinf(g)]
-    
-    return all_grads
-
-# 不需要单独的梯度范数可视化函数，因为我们只展示对比图
-
 def main():
     """主函数：执行模型训练和损失景观分析"""
     # 解析命令行参数
@@ -280,8 +245,6 @@ def main():
     # 使用命令行参数中的epochs和学习率
     losses_lists_vgg = []
     losses_lists_vgg_bn = []
-    grads_lists_vgg = []
-    grads_lists_vgg_bn = []
 
     # 对每个学习率训练VGG模型
     for lr in learning_rates:
@@ -290,9 +253,8 @@ def main():
         model = VGG_A()
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         criterion = nn.CrossEntropyLoss()
-        model_losses, model_grads = train(model, optimizer, criterion, train_loader, test_loader, epochs_n=epochs)
+        model_losses = train(model, optimizer, criterion, train_loader, test_loader, epochs_n=epochs)
         losses_lists_vgg.append(model_losses)
-        grads_lists_vgg.append(model_grads)
         
         # 保存该模型的所有batch损失
         # 将所有epoch的batch损失展平为一个列表
@@ -308,9 +270,8 @@ def main():
         model_bn = VGG_A_BatchNorm()
         optimizer_bn = torch.optim.Adam(model_bn.parameters(), lr=lr)
         criterion_bn = nn.CrossEntropyLoss()
-        model_losses_bn, model_grads_bn = train(model_bn, optimizer_bn, criterion_bn, train_loader, test_loader, epochs_n=epochs)
+        model_losses_bn = train(model_bn, optimizer_bn, criterion_bn, train_loader, test_loader, epochs_n=epochs)
         losses_lists_vgg_bn.append(model_losses_bn)
-        grads_lists_vgg_bn.append(model_grads_bn)
         
         # 保存该模型的所有batch损失
         # 将所有epoch的batch损失展平为一个列表
@@ -324,42 +285,16 @@ def main():
     
     # 计算VGG_BN模型的min_curve和max_curve
     min_curve_vgg_bn, max_curve_vgg_bn = compute_loss_curves(losses_lists_vgg_bn)
-    
-    # 绘制梯度范数对比图
-    print("Drawing gradient norm comparison plots...")
-    for i, lr in enumerate(learning_rates):
-        # 处理VGG的梯度数据
-        vgg_grads = process_gradients(grads_lists_vgg[i])
-        
-        # 处理VGG_BN的梯度数据
-        vgg_bn_grads = process_gradients(grads_lists_vgg_bn[i])
-        
-        # 绘制对比图
-        plt.figure(figsize=(12, 6))
-        
-        # 如果梯度数据太多，进行降采样以提高可读性
-        sample_rate = max(1, len(vgg_grads) // 500)  # 最多显示500个点
-        
-        # 绘制梯度对比曲线
-        plt.plot(vgg_grads[::sample_rate], label='VGG', color='#8FBC8F', alpha=0.8, linewidth=1.5)
-        plt.plot(vgg_bn_grads[::sample_rate], label='VGG+BN', color='#DB7093', alpha=0.8, linewidth=1.5)
-        
-        # 添加图表标题和标签（使用英文）
-        plt.title(f'Gradient Norm Comparison (lr={lr})', fontsize=16)
-        plt.xlabel('Training Steps', fontsize=14)
-        plt.ylabel('Gradient Norm', fontsize=14)
-        
-        # 设置对数刻度使梯度变化更明显
-        plt.yscale('log')
-        
-        # 添加图例和网格
-        plt.legend(fontsize=12)
-        plt.grid(True, alpha=0.3, which='both')  # both major and minor grid lines
-        
-        # 保存图像
-        plt.savefig(os.path.join(figures_path, f'gradient_norms_comparison_lr_{lr}.png'), dpi=300, bbox_inches='tight')
-        plt.close()
 
+    # 调试：打印前20个min_curve和max_curve的值
+    print("VGG min_curve前20:", min_curve_vgg[:20])
+    print("VGG max_curve前20:", max_curve_vgg[:20])
+    print("VGG min==max前20:", [np.isclose(a, b) for a, b in zip(min_curve_vgg[:20], max_curve_vgg[:20])])
+
+    print("VGG+BN min_curve前20:", min_curve_vgg_bn[:20])
+    print("VGG+BN max_curve前20:", max_curve_vgg_bn[:20])
+    print("VGG+BN min==max前20:", [np.isclose(a, b) for a, b in zip(min_curve_vgg_bn[:20], max_curve_vgg_bn[:20])])
+    
     print(f"{'='*50}")
     print(f"训练完成，开始绘制损失景观对比图...")
     print(f"{'='*50}")

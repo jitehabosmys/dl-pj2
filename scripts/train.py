@@ -100,7 +100,6 @@ def split_train_val_data(train_dataset, val_ratio=0.1, seed=42):
     indices = list(range(dataset_size))
     val_size = int(val_ratio * dataset_size)
     
-    # 设置随机种子确保可重复性
     random.seed(seed)
     random.shuffle(indices)
     
@@ -114,10 +113,9 @@ def split_train_val_data(train_dataset, val_ratio=0.1, seed=42):
 
 
 def main():
-    # 解析命令行参数
+    
     args = parse_args()
     
-    # 设置随机种子
     set_seed(args.seed)
     
     # 创建输出目录
@@ -126,7 +124,7 @@ def main():
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(image_dir, exist_ok=True)
     
-    # 生成模型名称（提前定义，确保全局访问）
+    # 生成模型名称
     if args.model_name:
         model_name = args.model_name
     else:
@@ -172,10 +170,10 @@ def main():
                 name=run_name,
                 config={
                     "model": args.model,
-                    "optimizer": "sgd",  # 固定为SGD
+                    "optimizer": "sgd",  
                     "lr": args.lr,
-                    "weight_decay": 5e-4,  # 固定为5e-4
-                    "momentum": 0.9,  # 固定为0.9
+                    "weight_decay": 5e-4,  
+                    "momentum": 0.9,  
                     "batch_size": args.batch_size,
                     "epochs": args.epochs,
                     "seed": args.seed,
@@ -184,7 +182,7 @@ def main():
                     "exp_tag": args.exp_tag,
                     "pretrained": args.pretrained,
                     "finetune_mode": args.finetune_mode,
-                    "lr_scheduler": "cosine",  # 固定为cosine
+                    "lr_scheduler": "cosine",  
                     "is_kaggle": is_kaggle
                 },
                 anonymous=anonymous
@@ -194,19 +192,17 @@ def main():
             print(f"初始化wandb时出错: {e}")
             print("将继续训练但不使用wandb")
             use_wandb = False
-    
-    # 设置设备
+
     device = torch.device("cuda" if args.cuda and torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
     
-    # 准备数据集和数据加载器
     from torchvision.datasets import CIFAR10
     import torchvision.transforms as transforms
     
     # CIFAR-10精确的归一化参数
     transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),  # 添加数据增强
-        transforms.RandomHorizontalFlip(),      # 添加数据增强
+        transforms.RandomCrop(32, padding=4), 
+        transforms.RandomHorizontalFlip(),      
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
     ])
@@ -219,7 +215,6 @@ def main():
     # 加载训练集
     train_dataset = CIFAR10(root='./data', train=True, download=args.download, transform=transform_train)
     
-    # 是否划分验证集
     train_loader = None
     val_loader = None
     
@@ -273,18 +268,13 @@ def main():
         except Exception as e:
             print(f"wandb.watch模型时出错: {e}")
     
-    # 创建优化器（固定为SGD）
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, 
                                momentum=0.9, weight_decay=5e-4)
-    
-    # 创建学习率调度器（固定为cosine）
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     print(f"使用CosineAnnealingLR学习率调度器，T_max={args.epochs}")
     
-    # 初始化最佳验证损失
     best_val_loss = float('inf')
     
-    # 训练模型
     print(f"\n{'='*50}\n训练 {args.model}\n{'='*50}")
     start_time = time.time()
     

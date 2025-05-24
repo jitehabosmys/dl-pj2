@@ -55,7 +55,7 @@
 \section{引言}
 % 项目背景和目标
 \subsection{项目背景和目标}
-本项目是“神经网络与深度学习”课程的第二个项目。项目的主要目标包括两个部分：
+本项目是"神经网络与深度学习"课程的第二个项目。项目的主要目标包括两个部分：
 
 第一部分需要在CIFAR-10数据集上训练神经网络模型，以优化分类性能。CIFAR-10是一个广泛使用的视觉识别数据集，包含60,000张32×32彩色图像，分属10个不同类别，每个类别有6,000张图像。
 
@@ -71,7 +71,7 @@
 % 网络架构设计
 \subsection{网络架构设计}
 
-在本项目中，我们采用了基于ResNet架构的卷积神经网络，并且针对 CIFAR-10 数据集做了适应性调整。我们的ResNet实现包含以下关键组件：
+在本项目中，我们采用了基于ResNet架构\cite{resnet}的卷积神经网络，并且针对 CIFAR-10 数据集做了适应性调整。我们的ResNet实现包含以下关键组件：
 
 \begin{itemize}
     \item \textbf{输入层}：接收32×32×3的CIFAR-10图像
@@ -123,7 +123,7 @@
     \item \textbf{学习率调度}：余弦退火可以在训练初期使用较大学习率加速收敛，后期降低学习率提高精度
 \end{itemize}
 
-在完成初步探索后，我们根据实验结果调整了部分超参数，并尝试了不同的网络深度、激活函数和优化器，以寻找最佳性能配置。
+在完成初步探索后，我们根据实验结果确定最佳性能配置，并在更大的模型上进行更长时间的训练，以获取最佳的分类性能。
 
 % 优化策略
 \subsection{实验结果与分析}
@@ -177,7 +177,7 @@ ReLU激活函数的优势在于其简单性和非饱和特性，可以有效缓�
 不同激活函数模型的验证损失可视化对比如图\ref{fig:activation}：
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{results/images/activation.png}
+    \includegraphics[width=0.5\textwidth]{results/images/activation.png}
     \caption{不同激活函数模型的验证损失}
     \label{fig:activation}
 \end{figure}
@@ -211,7 +211,7 @@ ReLU激活函数的优势在于其简单性和非饱和特性，可以有效缓�
 不同损失函数模型的验证集准确率可视化对比如图\ref{fig:loss_acc}：
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{results/images/loss_acc.png}
+    \includegraphics[width=0.5\textwidth]{results/images/loss_acc.png}
     \caption{不同损失函数模型的验证集准确率}
     \label{fig:loss_acc}
 \end{figure}
@@ -248,7 +248,7 @@ ReLU激活函数的优势在于其简单性和非饱和特性，可以有效缓�
 不同权重衰减值模型的训练集准确率可视化对比如图\ref{fig:decay_train}：
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{results/images/decay_train.png}
+    \includegraphics[width=0.5\textwidth]{results/images/decay_train.png}
 \caption{不同权重衰减值模型的训练集准确率}
     \label{fig:decay_train}
 \end{figure}
@@ -287,7 +287,11 @@ Adam和RMSprop具有自适应学习率的优势，但在ResNet模型上表现不
 % 最佳模型配置
 \subsubsection{最佳模型配置}
 
-基于上述实验结果，我们确定了最佳模型配置，并在更大的模型上进行了训练。表\ref{tab:best_model}展示了最佳配置的性能。
+基于上述实验结果，我们确定了最佳模型配置，并在更大的模型上进行了训练。首先，我们将实验用的较小模型进行50轮训练，
+展现简单模型在较短的时间内能达到的最佳结果。然后我们选择传入参数[2,2,2,2]
+得到一个针对本任务调整的ResNet18，参数为11.17M。此外，我们还参考了何恺明等人提出的预激活ResNet（Pre-activation ResNet）\cite{preact_resnet}，实现了PreActResNet18模型。
+预激活ResNet通过将激活函数移到卷积层之前，使得残差连接能够更好地传递梯度。最后，基于对训练过程的分析，我们训练了一个
+不使用验证集的ResNet18模型。表\ref{tab:best_model}展示了最佳配置的性能。
 
 \begin{table}[htbp]
 \centering
@@ -295,21 +299,67 @@ Adam和RMSprop具有自适应学习率的优势，但在ResNet模型上表现不
 \label{tab:best_model}
 \begin{tabular}{lcccc}
 \toprule
-\textbf{模型配置} & \textbf{参数量} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} & \textbf{训练时间(分钟)} \\
+\textbf{模型配置} & \textbf{参数量} & \textbf{最佳验证准确率} & \textbf{最佳测试准确率} & \textbf{训练轮数} \\
 \midrule
-ResNet([1,1,1,1]) & 4.90M & 91.72\% & 92.07\% & 7.5 \\
-ResNet([1,2,1,2]) & 9.92M & 91.82\% & 91.75\% & 9.0 \\
+ResNet([1,1,1,1]) & 4.90M & 93.08\% & 93.22\% & 50 \\
+ResNet18 & 11.17M & 94.88\% & 95.09\% & 150 \\
+PreActResNet18 & 11.17M & 94.72\% & 94.45\% & 150 \\
+ResNet18(no validation) & 11.17M & - & 95.16\% & 150 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-从表\ref{tab:best_model}可以看出，使用最佳配置（ReLU激活函数、权重衰减0.0005、SGD优化器、批量归一化）训练的ResNet([1,1,1,1])模型在测试集上达到了92.07\%的准确率，这是我们在这个实验阶段取得的最佳结果。
+从表\ref{tab:best_model}可以看出，较浅的ResNet模型在较短时间的训练下已经取得不错的分类效果，在测试集上达到
+93.22\% 的准确率。更大的ResNet模型表现优秀，在测试集上的准确率突破95\%，达到95.09\%。预激活结构并没有达到更好的
+效果，可能是由于之前的超参数实验是针对标准ResNet结构进行，所以同样的配置对预激活结构可能并非最优。
+ResNet18模型的训练损失可视化分别如图 \ref{fig:resnet_train}、图 \ref{fig:resnet_val}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{results/images/resnet_train.png}
+\caption{ResNet18模型的训练损失}
+    \label{fig:resnet_train}
+\end{figure}
 
-有趣的是，增加网络深度（ResNet([1,2,1,2])）并没有带来性能提升，反而略有下降。这表明对于CIFAR-10数据集，较浅的ResNet模型已经足够捕捉数据中的特征，增加网络深度并不一定能带来性能提升。这可能是因为CIFAR-10数据集的复杂度相对较低，不需要非常深的网络就能达到良好的分类效果。
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{results/images/resnet_val.png}
+\caption{ResNet18模型的验证损失}
+    \label{fig:resnet_val}
+\end{figure}
 
-值得注意的是，即使是最小的ResNet([1,1,1,1])模型，其参数量也达到了4.90M，这已经足够复杂以捕捉CIFAR-10数据集中的大部分特征。在后续实验中，我们可以尝试更深的模型（如ResNet([2,2,2,2])或ResNet([3,3,3,3])），以探索网络深度对性能的影响。
+观察训练和验证损失曲线，可以发现训练损失平滑下降至接近0，而验证损失还能随着训练进一步下降。从准确率来看，训练集上的准确率最终可以达到接近100\%，而验证集上的准确率达到95.x\%，并且“过拟合”在这里似乎不是一个严重的问题。处于这样的考虑，我们决定将全量数据用来训练，验证集准确率略有提升达到\textbf{95.16\%}，为本次实验的最优结果。
 
-% 结果可视化
+此外，我们对ResNet18的卷积核权重进行了可视化分析，重点关注了网络的第一层卷积层（初始卷积层）、第十层卷积层（中间卷积层）和最后一层卷积层（最终卷积层）。当通道数大于3时，我们采用取平均的方式将多通道特征图转换为灰度图像进行展示。
+
+初始卷积层的卷积核权重可视化如图 \ref{fig:layer0}所示。该层卷积核结构较为简单，主要负责提取低级特征，如边缘、颜色块。
+可以看到，部分滤波器显示出类似边缘检测、颜色对比（如红-绿、蓝-黄）等初级视觉特征。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{results/images/resnet18_epoch150_layer_0_module_conv1.png}
+    \caption{ResNet18初始卷积层的权重可视化}
+    \label{fig:layer0}
+\end{figure}
+
+中间卷积层的卷积核权重可视化如图 \ref{fig:layer9}所示（处于展示效果，这里只呈现128个卷积核的前64个）。该层卷积核结构较为复杂，主要负责提取高级特征，如纹理、形状。
+可以看到，部分滤波器呈现明显的方向性（如水平、垂直、斜向），可能用于检测纹理、边缘和轮廓；部分滤波器出现了空洞结构或明显的负/正权重块分布，这是一种特征压制/增强的方式。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{results/images/layer_9.png}
+    \caption{ResNet18中间卷积层的权重可视化}
+    \label{fig:layer9}
+\end{figure}
+
+最终卷积层的卷积核权重可视化如图 \ref{fig:layer19}所示。该层卷积核看起来更混乱且高度抽象，难以通过肉眼直接识别其功能。
+可以看到，部分滤波器呈现明显的方向性（如水平、垂直、斜向），可能用于检测纹理、边缘和轮廓；部分滤波器出现了空洞结构或明显的负/正权重块分布，这是一种特征压制/增强的方式。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{results/images/layer_19.png}
+    \caption{ResNet18最终卷积层的权重可视化}
+    \label{fig:layer19}
+\end{figure}
 
 % 3. 批归一化研究
 \section{批归一化研究}
@@ -359,19 +409,19 @@ ResNet([1,2,1,2]) & 9.92M & 91.82\% & 91.75\% & 9.0 \\
 \bibitem{CIFAR} CIFAR-10 dataset, \url{https://www.cs.toronto.edu/~kriz/cifar.html}
 \bibitem{BN} Ioffe, Sergey, and Christian Szegedy. "Batch normalization: Accelerating deep network training by reducing internal covariate shift." ICML 2015.
 \bibitem{BN_smoothing} Santurkar, Shibani, et al. "How does batch normalization help optimization?" NeurIPS 2018.
+\bibitem{resnet} Kaiming He , et al. "Deep residual learning for image recognition." CVPR 2016.
+\bibitem{preact_resnet} Kaiming He, et al. "Identity mappings in deep residual networks." ECCV 2016.
 \end{thebibliography}
 
 % 附录
 \section{附录}
 % 代码链接
 \subsection{代码链接}
-代码仓库链接：\url{https://github.com/...}
+代码仓库链接：\url{https://github.com/jitehabosmys/dl-pj2}
 
 % 模型权重链接
 \subsection{模型权重链接}
-模型权重下载链接：\url{https://...}
+模型权重下载链接：\url{https://drive.google.com/drive/folders/1M0-Ik3hqFYuKWuCE-PF2A_abZi5fbGyR}
 
-% 其他补充材料
-\subsection{其他补充材料}
 
 \end{document} 
